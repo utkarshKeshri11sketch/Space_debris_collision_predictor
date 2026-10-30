@@ -10,6 +10,8 @@ from app.physics.maneuver import (
     collision_probability,
     cw_displacement_km,
     encounter_from_detail,
+    encounter_from_screening,
+    encounter_plane_basis,
     options,
     options_for,
     plan_for_detail,
@@ -240,6 +242,43 @@ def test_options_for_each_negotiating_operator():
     assert a[0]["propellantKg"] == pytest.approx(propellant_kg(a[0]["dvMs"], starlink), rel=1e-3)
     assert b[0]["propellantKg"] == pytest.approx(propellant_kg(b[0]["dvMs"], oneweb), rel=1e-3)
     assert b[0]["propellantKg"] > 0  # grams, never rounded to zero
+
+
+def test_encounter_plane_axes_match_screening_convention():
+    # Same convention as app/physics/screening.py: x = projected primary radial, y = v_rel_hat x x.
+    # LEO crossings have v_rel with a negative along-track part, so y must come out close to +N
+    # (the frontend draws N upwards). The old x cross v_rel convention gave -N and mirrored the ellipse.
+    enc = crossing_encounter()
+    rp, vp = np.asarray(enc.r_primary_km), np.asarray(enc.v_primary_kms)
+    v_rel = np.asarray(enc.v_secondary_kms) - vp
+    assert np.dot(v_rel, rtn_basis(rp, vp)[1]) < 0
+    x, y = encounter_plane_basis(rp / np.linalg.norm(rp), v_rel)
+    w = v_rel / np.linalg.norm(v_rel)
+    np.testing.assert_allclose(y, np.cross(w, x))
+    assert np.dot(y, rtn_basis(rp, vp)[2]) > 0.5
+
+
+def test_encounter_from_screening_duck_types_screening_output():
+    enc = crossing_encounter()
+
+    class Record:
+        def __init__(self, norad_id, name):
+            self.norad_id, self.catalog = norad_id, {"name": name}
+
+    class Uncertainty:
+        hard_body_radius_m = 58.0
+
+    class Screened:  # attribute names of app.physics.screening.Encounter
+        tca = enc.tca
+        primary, secondary = Record(25544, "ISS (ZARYA)"), Record(50870, "COSMOS 1408 DEB")
+        primary_position_km, primary_velocity_km_s = enc.r_primary_km, enc.v_primary_kms
+        secondary_position_km, secondary_velocity_km_s = enc.r_secondary_km, enc.v_secondary_kms
+        covariance = {"sigmaMajorM": 186.0, "sigmaMinorM": 74.0, "angleDeg": 32.0}
+        uncertainty = Uncertainty()
+
+    converted = encounter_from_screening(Screened())
+    assert plan_maneuvers(converted, now=NOW).options == plan_maneuvers(enc, now=NOW).options
+    assert converted.primary_name == "ISS (ZARYA)" and len(converted.range_t_sec) == 81
 
 
 def test_non_maneuverable_mover_and_unknown_id():

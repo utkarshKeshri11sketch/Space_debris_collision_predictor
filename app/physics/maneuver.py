@@ -158,14 +158,19 @@ def rtn_basis(r_km: np.ndarray, v_kms: np.ndarray) -> np.ndarray:
 
 
 def encounter_plane_basis(radial_hat: np.ndarray, v_rel_kms: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """x = primary radial projected perpendicular to v_rel; y = x cross v_rel_hat.
-    When v_rel is mostly along-track, y is close to +N, which matches the frontend's encounter plot."""
+    """x = primary radial projected perpendicular to v_rel; y = v_rel_hat cross x.
+
+    Same convention as app/physics/screening.py, which defines `covariance.angleDeg`. For LEO
+    crossings the relative velocity always has a negative along-track part
+    (v_s - v_p = v (cos(theta) - 1, sin(theta)) in T/N), so y lies close to +N, as the frontend's
+    encounter plot assumes.
+    """
     w = _unit(v_rel_kms)
     x = radial_hat - np.dot(radial_hat, w) * w
     if np.linalg.norm(x) < 1e-9:  # v_rel parallel to radial: pick any perpendicular axis
         x = np.cross(w, [0.0, 0.0, 1.0]) if abs(w[2]) < 0.9 else np.cross(w, [1.0, 0.0, 0.0])
     x = _unit(x)
-    return x, np.cross(x, w)
+    return x, np.cross(w, x)
 
 
 def cw_displacement_km(n_rad_s: float, t_s: float, dv_rtn_kms: np.ndarray) -> np.ndarray:
@@ -486,6 +491,23 @@ def encounter_from_detail(detail: Mapping[str, Any], *, primary_omm: Mapping[str
         primary_norad_id=int(detail["primary"]["noradId"]), primary_name=detail["primary"].get("name"),
         secondary_norad_id=int(detail["secondary"]["noradId"]), secondary_name=detail["secondary"].get("name"),
         range_t_sec=[float(p["tSec"]) for p in series] or None,
+    )
+
+
+def encounter_from_screening(screened: Any) -> Encounter:
+    """Exact geometry from an `app.physics.screening.Encounter` (duck-typed, so this module does not
+    import sgp4): TEME states at TCA, combined covariance in the shared encounter-plane convention,
+    and the combined hard-body radius."""
+    cov = screened.covariance
+    return Encounter(
+        tca=screened.tca,
+        r_primary_km=screened.primary_position_km, v_primary_kms=screened.primary_velocity_km_s,
+        r_secondary_km=screened.secondary_position_km, v_secondary_kms=screened.secondary_velocity_km_s,
+        sigma_major_m=float(cov["sigmaMajorM"]), sigma_minor_m=float(cov["sigmaMinorM"]),
+        angle_deg=float(cov["angleDeg"]), hard_body_radius_m=float(screened.uncertainty.hard_body_radius_m),
+        primary_norad_id=int(screened.primary.norad_id), primary_name=screened.primary.catalog.get("name"),
+        secondary_norad_id=int(screened.secondary.norad_id), secondary_name=screened.secondary.catalog.get("name"),
+        range_t_sec=[(i - 40) * 1.5 for i in range(81)],  # screening's rangeSeries grid
     )
 
 

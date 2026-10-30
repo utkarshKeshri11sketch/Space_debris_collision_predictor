@@ -2,31 +2,24 @@
 
 Add requests at the bottom. Say who asks, who answers, and the status.
 
-## PHYS-1 · Physics → Screening: encounter state at TCA (open, not blocking)
+## PHYS-1 · Physics → Screening: encounter state at TCA (done by be-screening)
 
-`maneuver.plan_for_detail()` already works from contract fields alone. It rebuilds the geometry from
-`rtnM` and `relSpeedKms`, assuming near-circular orbits; see `encounter_from_detail`. For exact
-geometry, pass an `Encounter` as `encounter=`. Please expose for each conjunction:
-
-- `tca` (UTC datetime)
-- `r_primary_km`, `v_primary_kms`, `r_secondary_km`, `v_secondary_kms` at TCA, in one inertial frame
-  (TEME straight from SGP4 is fine)
-- the combined covariance, as the contract `covariance` object: `sigmaMajorM`, `sigmaMinorM`, `angleDeg`.
-  It lives in the encounter plane perpendicular to v_rel. The angle runs counter-clockwise from the
-  radial axis, matching the frontend's R-horizontal / N-vertical EncounterPlane.
-- `hardBodyRadiusM` and the `rangeSeries` `tSec` grid
-
-Proposal: compute the list `pc` with `app.physics.maneuver.collision_probability()` so that `pc` and
-each option's `newPc` use the same formula.
+`be-screening`'s `Encounter` already carries the TEME states at TCA, the combined covariance and the
+HBR. `maneuver.encounter_from_screening(encounter)` converts it (duck-typed, no sgp4 import). On a
+real SGP4 conjunction, Physics and Screening Pc agree to a ratio of 1.000000 (see PHYS-8). Without
+it, `plan_for_detail()` falls back to rebuilding geometry from `rtnM` and `relSpeedKms`; on the same
+case that gave the same Δv within 0.01 m/s.
 
 ## PHYS-2 · Physics → Lead: wiring (open)
 
 Code lives at the repo root, `app/physics/` and `tests/physics/`, like `app/ai/` on `be-ai`.
 
-- `GET /api/conjunctions/:id`:
-  `detail.update(plan_for_detail(detail, now=now, primary_omm=primary["omm"]).to_contract())`.
-  This sets `options` and, when a burn is recommended, `afterSeries`. Add `encounter=` once
-  Screening provides states.
+- `GET /api/conjunctions/:id`, with `enc` = the screening `Encounter` for that id:
+  `plan = plan_for_detail(enc.as_conjunction() | {...}, now=now, encounter=encounter_from_screening(enc))`.
+  Simpler: `detail = run.get_detail(id)` and then
+  `detail.update(plan_for_detail(detail, now=now, encounter=encounter_from_screening(enc)).to_contract())`.
+  This sets `options` and, when a burn is recommended, `afterSeries`. You can also pass the options
+  straight to `run.get_detail(id, options=plan.options)` and set `afterSeries` afterwards.
 - Negotiator candidates (answers the AI request below):
   `{str(o["noradId"]): next(x for x in options_for(detail, o["noradId"], now=now) if x["direction"] != "none") for o in (primary, secondary)}`.
 - `POST /api/cascade`: `simulate(request, catalog, environment=env).result` returns `CascadeResult`.
@@ -75,3 +68,43 @@ case where that object moves, using its own mass/Isp. A non-maneuverable object 
 
 `be-ai` and `be-physics` both create `docs/CONTRACT_REQUESTS.md`, so expect a merge conflict. Keep
 both sets of sections.
+
+## PHYS-8 · Physics → Screening: review of `app/physics/screening.py` (be-screening 6ffe5a6)
+
+How I checked it: ran Screening's 46 tests locally (all pass). Compared both Pc implementations on
+400 random geometries against a brute-force disk integral. Screened a synthetic ISS × COSMOS
+crossing with real SGP4 (949 m miss, 4.08 km/s, tilted correlated covariance, Pc 4.98e-4) and fed the
+resulting `Encounter` into the maneuver planner.
+
+Correct, no action needed:
+
+- The 2-D Pc formulation (Gaussian centred on the miss, HBR disk at the origin, eigen-rotation,
+  x = R·sin θ, tail-safe erfc). The RTN → TEME → encounter-plane covariance combination. Real SGP4
+  `rangeSeries`. The explicit `risk_model`, so no covariance is silently invented. WGS72 SGP4
+  straight from OMM.
+- Broad-phase padding a·dt²/8 with a = 0.03 km/s² is a valid chord-deviation bound, since relative
+  gravitational acceleration is ≤ 2g ≈ 0.0196 km/s².
+
+Findings:
+
+1. **Encounter-plane axis convention (fixed on the Physics side).** Screening uses y = v̂_rel × x̂.
+   Physics used x̂ × v̂_rel, which mirrors `angleDeg`. On the test case the mirrored axis gave Pc 5.09e-4
+   instead of 4.98e-4; the error grows with ellipse tilt. Physics now uses Screening's convention.
+   It is also the right one for the UI: v_rel's along-track part is always negative in LEO
+   crossings, so y ≈ +N, as the EncounterPlane draws it. Please keep the convention stable and note
+   it in your README.
+2. **Window-boundary "TCAs" (minor).** When range is increasing at the window start (or decreasing at
+   the end), a boundary point is reported as the TCA. `missDistanceM` is then the 3-D range at the
+   boundary, but `pc` uses the encounter-plane projection. That projection is the miss of a pass
+   *outside* the window, so the two numbers disagree. With a 10 km envelope at 10 km/s this needs the
+   real TCA within about 1 s of the edge. Slow, near co-orbital pairs (0.01–1 km/s) can stay inside
+   the envelope for minutes, though. Suggest: drop start-boundary minima (that pass is over) and refine
+   end-boundary ones beyond `end` to the true TCA, or flag them as an issue.
+3. **Pc convergence tolerance (cosmetic).** `abs(p - prev) <= 1e-12 + 1e-6 p` stops at 32 nodes for
+   tiny Pc. Below about 1e-10 results are only good to a few percent (2.8 % at 1e-38 against brute
+   force). That is irrelevant to the 1e-6 / 1e-5 / 1e-4 thresholds; a relative-only test or a note
+   would do.
+4. **Middle erfc branch (nit).** `1 - (erfc(b) + erfc(-a)) / 2` cancels when the y-chord is short (near
+   the disk edge); `(erf(b) - erf(a)) / 2` keeps full precision. Negligible effect on totals.
+5. **Contract item 7 (agree).** The frontend's ellipse view is schematic R/N; with the convention in
+   (1) it is a good approximation when v_rel is mostly along-track.
