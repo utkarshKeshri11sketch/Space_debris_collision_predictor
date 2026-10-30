@@ -23,6 +23,11 @@ def probability(pc: float) -> str:
     return f"{coefficient} × 10{''.join(_SUPERSCRIPT.get(c, c) for c in str(int(exponent)))}"
 
 
+def odds(pc: float) -> str:
+    """'1 in 3,226' (same rounding as the frontend's probabilityOdds)."""
+    return f"1 in {round(1 / pc):,}" if 0 < pc <= 1 else "unknown"
+
+
 def kg(value: float) -> str:
     return f"{value:.2f} kg" if value >= 0.01 or value == 0 else f"{value:.3f} kg"
 

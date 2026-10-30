@@ -24,6 +24,7 @@ def scan(text: str, known_names: Iterable[str] = ()) -> list[tuple[float, bool]]
         if name:
             text = re.sub(re.escape(name), " ", text, flags=re.IGNORECASE)
     text = _ISO.sub(" ", text)
+    text = re.sub(r"(?<=\d)[   ](?=\d{3}(?!\d))", "", text)  # "4 200 m" -> "4200 m"
     found: list[tuple[float, bool]] = []
 
     def sci(match: re.Match[str]) -> str:
@@ -47,6 +48,8 @@ def collect_numbers(value: Any) -> list[float]:
         return []
     if isinstance(value, (int, float)):
         return [float(value)]
+    if isinstance(value, str):  # numbers quoted inside notes (e.g. "imaging pass in 3 hours") are also facts
+        return numbers_in(value)
     if isinstance(value, dict):
         return [n for v in value.values() for n in collect_numbers(v)]
     if isinstance(value, (list, tuple)):
