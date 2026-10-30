@@ -225,6 +225,7 @@ class IncidentDecision(BaseModel):
     moverNoradId: int
     maneuver: ManeuverOption
     criteria: list[Criterion]
+    alternative: ManeuverOption | None = None  # the other side's best burn, for the comparison
 
 
 class IncidentNarrative(BaseModel):

@@ -42,7 +42,9 @@ def _analysis(case_id: str) -> tuple[dict | None, str]:
     return result, status
 
 
-def _comparison(reality: dict | None, maneuver: dict | None) -> dict | None:
+def _comparison(reality: dict | None, decision: dict | None) -> dict | None:
+    """What happened (station burn) vs OrbitSentinel's recommended burn."""
+    maneuver = (decision or {}).get("maneuver")
     if not reality or not maneuver or not reality.get("propellantKg") or not maneuver.get("propellantKg"):
         return None
     saved = reality["propellantKg"] - maneuver["propellantKg"]
@@ -59,7 +61,9 @@ def build(case_id: str) -> CaseStudy | None:
     decision, ai_status = (None, "pending")
     narrative = None
     if analysis:
-        decision, ai_status = _try("ai.recommend", ai_incident.recommend, analysis["conjunction"], analysis["optionsBySide"])
+        sat_a, sat_b = ai_incident.sat_profiles(case, analysis)
+        decision, ai_status = _try("ai.recommend", ai_incident.recommend, analysis["conjunction"],
+                                   analysis["optionsBySide"], sat_a, sat_b)
         if decision:
             narrative, _ = _try("ai.narrate", ai_incident.narrate, case, analysis, decision)
     sources = [{"key": key, **value} for key, value in facts.SOURCES.items()]
@@ -69,7 +73,7 @@ def build(case_id: str) -> CaseStudy | None:
         "conjunction": get_conjunction(case_id).model_dump() if analysis else None,
         "reality": analysis["reality"] if analysis else None,
         "orbitSentinel": decision, "narrative": narrative,
-        "comparison": _comparison(analysis and analysis["reality"], decision and decision.get("maneuver")),
+        "comparison": _comparison(analysis and analysis["reality"], decision),
         "assumptions": analysis["assumptions"] if analysis else [],
         "status": {"physics": physics_status, "ai": ai_status},
     })
@@ -90,6 +94,5 @@ def negotiation_inputs(case_id: str) -> tuple[dict, dict | None, dict | None, di
     if not analysis:
         return None
     from ..ai import incident as ai_incident
-    profiles, _ = _try("ai.sat_profiles", ai_incident.sat_profiles, facts.case(case_id))
-    sat_a, sat_b = profiles or (None, None)
+    sat_a, sat_b = ai_incident.sat_profiles(facts.case(case_id), analysis)
     return get_conjunction(case_id).model_dump(), sat_a, sat_b, analysis["optionsBySide"]

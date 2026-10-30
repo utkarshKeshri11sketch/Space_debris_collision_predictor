@@ -25,7 +25,7 @@ the station's burn size were **not published**: they must be reconstructed and l
 | --- | --- | --- |
 | Facts, sources, assembly, API, presentation simulation page | Lead | `backend/app/casestudy/`, `backend/app/routers/case_studies.py`, `docs/case_studies/` |
 | Encounter reconstruction + costing both sides | Physics | `backend/app/physics/incident.py` + `backend/tests/physics/test_incident.py` |
-| Decision, negotiation profiles, narrative | AI | `backend/app/ai/incident.py` + `backend/tests/ai/test_incident.py` |
+| Decision, negotiation profiles, narrative | Lead (AI agent not used for this task) | `backend/app/ai/incident.py` + `backend/tests/ai/test_incident.py` |
 
 ## Physics: `analyse(case: dict) -> dict`
 
@@ -52,11 +52,11 @@ Use `app.physics.maneuver` (`plan_maneuvers`, `propellant_kg`, `Encounter`) so c
 models as live events. Historical element sets: Space-Track GP_HISTORY (needs a free account) if
 available; otherwise build circular orbits from the published altitudes/inclinations and state that.
 
-## AI: `recommend`, `narrate`, `sat_profiles`
+## AI part (built by Lead): `recommend`, `narrate`, `sat_profiles`
 
-- `recommend(conjunction, options_by_side) -> {"moverSide": "a"|"b", "moverNoradId": int, "maneuver": ManeuverOption, "criteria": [{name, weight, a, b}]}`
+- `recommend(conjunction, options_by_side, sat_a, sat_b) -> {"moverSide": "a"|"b", "moverNoradId": int, "maneuver": ManeuverOption, "criteria": [{name, weight, a, b}], "alternative": ManeuverOption}`
   — the same scoring as the live negotiator (`app.ai.scoring`), weights 35/25/20/20.
-- `sat_profiles(case) -> (sat_a, sat_b)` — `negotiate()` inputs for the 2021 station (crewed, chemical
+- `sat_profiles(case, analysis) -> (sat_a, sat_b)` — `negotiate()` inputs for the 2021 station (crewed, chemical
   thrusters, high mission impact) and the 2021 Starlink (v1.x, ~260 kg, Hall thrusters). Mark every
   non-public value as assumed.
 - `narrate(case, analysis, decision) -> {"reality": str, "orbitSentinel": str, "brief": str}` — grounded
