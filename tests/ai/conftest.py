@@ -2,77 +2,79 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, so `import app.ai` works
 
+from app.ai import llm  # noqa: E402
+from app.ai.demo import scenarios  # noqa: E402
+
 NOW = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
 
 
-def iso(hours: float) -> str:
-    return (NOW + timedelta(hours=hours)).isoformat().replace("+00:00", "Z")
-
-
-def ref(norad: int, name: str, type_: str = "PAYLOAD", maneuverable: bool = True) -> dict:
-    return {"noradId": norad, "name": name, "type": type_, "maneuverable": maneuverable}
-
-
-def option(id_, label, direction, dv, burn_h, miss, pc, kg, rec=False) -> dict:
-    return {
-        "id": id_, "label": label, "direction": direction, "dvMs": dv,
-        "burnAt": None if burn_h is None else iso(burn_h), "newMissM": miss, "newPc": pc,
-        "propellantKg": kg, "recommended": rec,
-    }
-
-
-def detail(id_, a, b, tca_h, miss, pc, speed, risk, options) -> dict:
-    return {
-        "id": id_, "primary": a, "secondary": b, "tca": iso(tca_h), "missDistanceM": miss,
-        "rtnM": {"r": 1, "t": 2, "n": 3}, "relSpeedKms": speed, "pc": pc, "risk": risk,
-        "rangeSeries": [], "covariance": {"sigmaMajorM": 186, "sigmaMinorM": 74, "angleDeg": 32},
-        "hardBodyRadiusM": 8, "options": options, "brief": "",
-    }
-
-
-ISS = ref(25544, "ISS (ZARYA)")
-COSMOS = ref(50870, "COSMOS 1408 DEB", "DEBRIS", False)
-STARLINK = ref(59121, "STARLINK-31502")
-ONEWEB = ref(48840, "ONEWEB-0461")
-FENGYUN = ref(30055, "FENGYUN 1C DEB", "DEBRIS", False)
-
-
-@pytest.fixture
-def iss_cosmos() -> dict:
-    return detail("iss-cosmos", ISS, COSMOS, 18.03, 412, 3.1e-4, 14.2, "critical", [
-        option("option-a", "A", "prograde", 0.42, 12.03, 4200, 2.3e-8, 0.18, True),
-        option("option-b", "B", "normal", 0.67, 14.03, 6800, 8.1e-10, 0.29),
-        option("no-action", "No action", "none", 0, None, 412, 3.1e-4, 0),
-    ])
-
-
-@pytest.fixture
-def starlink_oneweb() -> dict:
-    return detail("starlink-oneweb", STARLINK, ONEWEB, 31.4, 690, 8.7e-5, 12.8, "high", [
-        option("option-a", "A", "prograde", 0.42, 25.4, 4200, 2.3e-8, 0.18, True),
-        option("no-action", "No action", "none", 0, None, 690, 8.7e-5, 0),
-    ])
-
-
-@pytest.fixture
-def watch_event() -> dict:
-    return detail("cartosat-fengyun", ref(44804, "CARTOSAT-3"), FENGYUN, 47.2, 1250, 7.2e-6, 10.4, "watch", [
-        option("no-action", "No action", "none", 0, None, 1250, 7.2e-6, 0),
-    ])
-
-
-@pytest.fixture
-def conjunctions(iss_cosmos, starlink_oneweb, watch_event) -> list[dict]:
-    return [iss_cosmos, starlink_oneweb, watch_event]
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """Tests never touch a real provider: no keys, cached provider, fresh cooldown state."""
+    for var in ("GROQ_API_KEY", "GEMINI_API_KEY", "CEREBRAS_API_KEY", "AI_RECORD_CACHE", "AI_BRIEF_MODE",
+                "AI_NEGOTIATION_REBUTTALS", "AI_COOLDOWN_S"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "cached")
+    monkeypatch.setattr(llm, "_live_complete", lambda *a, **k: (_ for _ in ()).throw(AssertionError("live provider called in a test")))
+    llm.reset_state()
+    yield
+    llm.reset_state()
 
 
 @pytest.fixture
 def now() -> datetime:
     return NOW
+
+
+@pytest.fixture
+def demo(now):
+    return scenarios(now)
+
+
+@pytest.fixture
+def starlink_oneweb(demo) -> dict:
+    return demo["starlink-oneweb"]
+
+
+@pytest.fixture
+def iss_cosmos(demo) -> dict:
+    return demo["iss-cosmos"]
+
+
+@pytest.fixture
+def conjunctions(demo) -> list[dict]:
+    return [s["conjunction"] for s in demo.values()]
+
+
+@pytest.fixture
+def watch_event(now) -> dict:
+    ref = lambda n, name, t="PAYLOAD", m=True: {"noradId": n, "name": name, "type": t, "maneuverable": m}  # noqa: E731
+    return {"id": "cartosat-fengyun", "primary": ref(44804, "CARTOSAT-3"), "secondary": ref(30055, "FENGYUN 1C DEB", "DEBRIS", False),
+            "tca": "2026-11-01T11:12:00Z", "missDistanceM": 1250, "relSpeedKms": 10.4, "pc": 7.2e-6, "risk": "watch",
+            "options": [{"id": "no-action", "label": "No action", "direction": "none", "dvMs": 0, "burnAt": None,
+                         "newMissM": 1250, "newPc": 7.2e-6, "propellantKg": 0, "recommended": False}]}
+
+
+class FakeLLM:
+    """Async callable with acall_llm's signature; returns canned text and counts calls."""
+
+    def __init__(self, reply):
+        self.reply, self.calls = reply, []
+
+    async def __call__(self, system, messages, json_mode=False, **kw):
+        self.calls.append({"system": system, "messages": messages, **kw})
+        if isinstance(self.reply, Exception):
+            raise self.reply
+        return self.reply(len(self.calls)) if callable(self.reply) else self.reply
+
+
+@pytest.fixture
+def fake_llm():
+    return FakeLLM

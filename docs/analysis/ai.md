@@ -1,97 +1,78 @@
-# Analysis: AI area (`app/ai/`, branch `be-ai`)
+# AI layer: how it works (for the team and the pitch)
 
-Written after reading the repo as of `origin/main` (frontend only; no backend, no `AGENTS.md`/`CLAUDE.md`).
-Sources: `frontend/src/api/{types,client,handlers,mockData}.ts`, `frontend/README.md`, `frontend/DECISIONS.md`,
-`NegotiatorScreen.tsx`, `ConjunctionScreen.tsx`, `App.tsx` (SentinelBrief, command palette).
+Branch `be-ai`, code in `app/ai/`, tests in `tests/ai/`. **Free LLM APIs only** (Groq, Gemini, Cerebras).
+Detail for developers: `app/ai/README.md`. Cross-team asks: `docs/CONTRACT_REQUESTS.md`.
 
-## 1. Repo layout
+## The idea in one paragraph
 
-```text
-frontend/   React + TS + Vite + three.js (done). API client in src/api/, MSW mocks in src/api/{handlers,mockData}.ts
-app/ai/     this agent's package          tests/ai/   this agent's tests          docs/   CONTRACT_REQUESTS.md, analysis/
-```
+Free collision warnings already exist, but they hand operators raw numbers and nobody decides who should move when
+two active satellites are on a collision course. Our AI layer plays the **lawyers and the judge**: one AI agent
+speaks for each operator, a mediator weighs fuel, cost, mission impact and Δv, and recommends who moves, streamed
+live like a chat. A human approves or overrides. The **numbers and the decision are computed by code**; the AI
+only explains them in plain English, and anything it says is checked against the data.
 
-Env vars: `VITE_USE_MOCKS` (default true; `false` = real backend), `VITE_API_BASE_URL` (empty = same origin).
-The client calls only `/api/...`, sends no auth, and supports `GET`/`POST` + `fetch` streaming.
+## What the audience sees (Starlink × OneWeb, live, ~8–10 s)
 
-## 2. All endpoints the frontend calls
+1. Mediator: the two spacecraft pass 690 m apart at 12.8 km/s, collision probability 8.7 × 10⁻⁵; each operator may speak.
+2. **Starlink's agent:** OneWeb's burn costs less propellant (0.03 kg vs 0.18 kg), so OneWeb should move.
+3. **OneWeb's agent:** Starlink has more fuel (78% vs 41%) and a burn costs it far less mission value (15% vs 45%).
+4. Rebuttals, then the **mediator's scores** (reserve 35 / cost 25 / mission impact 20 / Δv 20) and decision:
+   a narrow call, Starlink moves (0.42 m/s prograde, miss 690 m → 4.2 km, Pc → 2.3 × 10⁻⁸).
+5. Both agents accept; the plan is "signed" and waits for **human approval** (or an override that triggers a re-plan).
 
-| Method | Path | Request | Response | Type | Owner |
-| --- | --- | --- | --- | --- | --- |
-| GET | `/api/catalog` | – | `CatalogObject[]` | JSON | Data |
-| GET | `/api/catalog/meta` | – | `CatalogMeta` | JSON | Data |
-| GET | `/api/conjunctions?days=7&minPc=1e-6` | query | `Conjunction[]` (mock returns details) | JSON | Screening / Lead |
-| GET | `/api/conjunctions/:id` | – | `ConjunctionDetail` (**has `brief`**) | JSON | Screening / Lead (+AI brief) |
-| POST | `/api/negotiations` | `{conjunctionId}` | `201 {negotiationId}`; 404 unknown; **422 if either object not maneuverable** | JSON | **AI** (+Lead router) |
-| GET | `/api/negotiations/:id/stream` | – | `NegotiationEvent` frames, 404 `{message}` if expired | **SSE** | **AI** |
-| POST | `/api/cascade` | `CascadeRequest` | `CascadeResult` | JSON | Physics |
-| POST | `/api/ask` | `{question}` (400 `{message}` if blank) | answer tokens | **SSE** | **AI** |
+ISS × COSMOS 1408 debris: debris cannot negotiate, so the ISS decides alone ("should our satellite move?").
 
-Errors: non-2xx JSON with `message` (or `detail`) is shown to the user verbatim.
+## What is computed vs. what the AI writes
 
-SSE framing (`client.ts`): `Content-Type: text/event-stream`, UTF-8 `data: <JSON>\n\n`, end with `data: [DONE]\n\n` or close.
-Parser tolerates CRLF, comments, multi-line data. Mock paces events ~1.35 s (+0–0.4 s) apart; ask tokens 20 ms apart.
-`ask` accepts per frame: a JSON string, `{type:"token",text}`, `{token}`, plain text, or `{type:"error",message}`.
+| Computed in Python (never by the AI) | Written by the AI (then validated) |
+| --- | --- |
+| Burn Δv / propellant / new miss / new Pc (from `maneuver.py`) | Each agent's argument and rebuttal |
+| The four criterion scores, weighted totals, who moves | The mediator's explanation |
+| Eligibility (Pc ≤ 1e-6), ties, split-burn check | The Sentinel brief wording |
+| Each agent's true talking points | Ask Sentinel answers |
 
-## 3. Exact shapes I produce / consume (copied from `types.ts`)
+Validation (`generate.py`): every number must appear in the facts we gave the model (m↔km allowed), the mediator
+must name the computed mover (and say "tie" if it was one), text must not be cut off or too long. Otherwise one
+regeneration, then a built-in template. Tested: the AI cannot change a score or the mover.
 
-```ts
-export type NegotiationEvent =
-  | { type: 'message'; speaker: 'mediator' | 'agentA' | 'agentB'; round: number; text: string }
-  | { type: 'scores'; criteria: { name: string; weight: number; a: number; b: number }[] }
-  | { type: 'agreement'; mover: ObjectRef; maneuver: ManeuverOption; signedBy: string[] }
-  | { type: 'error'; message: string };
-export interface ObjectRef { noradId: number; name: string; type: ObjectType; maneuverable: boolean }
-export interface ManeuverOption {
-  id: string; label: string; direction: 'prograde' | 'retrograde' | 'radial' | 'normal' | 'none';
-  dvMs: number; burnAt: string | null; newMissM: number; newPc: number; propellantKg: number; recommended: boolean;
-}
-export interface ConjunctionDetail extends Conjunction {   // Conjunction: id, primary, secondary: ObjectRef, tca,
-  rangeSeries; afterSeries?; covariance; hardBodyRadiusM;  //   missDistanceM, rtnM, relSpeedKms, pc, risk
-  options: ManeuverOption[]; brief: string;                // <-- brief: plain string, AI-generated
-}
-```
+## Providers and resilience
 
-Units: metres (miss), km/s (speed), m/s (Δv), kg (propellant), ISO-8601 UTC times, `pc` is a probability 0–1.
+`call_llm(system, messages, stream=False, json_mode=False)` in `llm.py`; order **groq → gemini → cerebras → cached**,
+start chosen by `LLM_PROVIDER`. 429, timeout (>15 s) or any error falls to the next; the failed provider is skipped
+for a while. Keys only from env vars (`app/ai/.env.example`). With `LLM_PROVIDER=cached` and no keys every AI
+function works from `app/ai/cache/` (pre-recorded) or built-in templates, with zero API calls.
 
-## 4. What the UI does with my output
+**Verified with real keys on 2026-10-30** (Groq + Gemini; no Cerebras key was available, so Cerebras is untested):
 
-* **Negotiator screen** (`NegotiatorScreen.tsx`): only starts if both objects `maneuverable`. Appends each `message` to a transcript
-  labelled by `speaker` + `ROUND n`; shows `scores` as a weighted-criteria table and **computes the totals itself**
-  (`Σ a·weight / Σ weight` per side), so `a` = suitability if agent A (**primary**) moves, `b` for B (secondary), 0–100 scale as in the mock.
-  `agreement` renders "`mover.name` maneuvers", `maneuver.dvMs`/`direction`/`newMissM`/`propellantKg`, and `signedBy.join(' + ')`.
-  `error` event or a stream that ends without agreement shows an error with Reconnect. A human override dialog exists; the stream
-  itself is only a recommendation. Mock sequence: mediator r0, agentA r1, agentB r1, mediator r2, scores, agentA r3, agentB r3, agreement.
-* **Sentinel brief** (`App.tsx` `SentinelBrief`): dashboard shows `useConjunction(topThreat.id).brief`, typewritten at ~5 chars/24 ms,
-  so **briefs must be short plain text, no markdown**. `ConjunctionScreen` shows the same `data.brief` on the detail page.
-* **Ask Sentinel** (command palette, Ctrl/⌘+K, Enter): appends tokens into one answer paragraph (`aria-live`); plain prose, no markdown.
-  Mock topics: ISS safety, cascade/debris, negotiation, else the global brief. Questions are free text.
-* **Phone alert / Cascade**: do not use AI endpoints.
+| Provider | Result |
+| --- | --- |
+| Groq | works with `openai/gpt-oss-120b` (~0.8 s/call). The brief's `llama-3.3-70b-versatile` **no longer exists** on this account; models listed were gpt-oss-120b/20b and qwen3.8-27b. Free tier: 8,000 tokens/min, so one negotiation uses most of a minute → Gemini takes over under load. |
+| Gemini | works with `gemini-2.5-flash` (thinking switched off; ~1.5 s/call). Full negotiation through Gemini alone: ~10 s. |
+| Cerebras | untested; default model id `llama-3.3-70b` is a guess. |
 
-Sample mock values to match: ISS×COSMOS 1408 DEB (412 m, Pc 3.1e-4, 14.2 km/s, option A 0.42 m/s prograde → 4.2 km, Pc 2.3e-8, 0.18 kg);
-STARLINK-31502 × ONEWEB-0461 (690 m, Pc 8.7e-5, 12.8 km/s, both maneuverable); mock `sentinelBrief` text in `mockData.ts`.
+Full live negotiation through Groq: 8.3 s to the final agreement (5 model calls; mediator runs in parallel with the debate).
 
-## 5. Dependencies on other agents
+## Frontend contract (unchanged)
 
-| Need | From | Status / workaround |
-| --- | --- | --- |
-| `ConjunctionDetail` incl. `options` | Screening + Physics via Lead | I take it as a dict; fixtures in `tests/ai/conftest.py` mirror the mocks |
-| Per-object `ManeuverOption` ("if THAT object moves") | Physics (`maneuver.py`) | Requested; fallback estimates the secondary's propellant from the primary's, disclosed in the mediator message |
-| Router, SSE wrapper, negotiation-id→conjunction store, 404/422 checks, IAM, env | Lead | Glue documented in `app/ai/README.md` |
-| Spacecraft propellant/mass/mission data | nobody (not in contract) | Illustrative profiles in `profiles.py`, labelled as assumptions |
-| Conjunction list for Ask | Lead | `ask_stream(question, {"conjunctions": [...]})` |
+`NegotiationEvent`: `message{speaker,round,text}` · `scores{criteria[{name,weight,a,b}]}` · `agreement{mover,maneuver,signedBy}` ·
+`error{message}`. Order: mediator r0 → agentA r1 → agentB r1 → (rebuttals r2) → mediator r3 → scores → acceptances r4 → agreement.
+`a`/`b` = suitability (0–100) of the primary/secondary moving; the UI computes the weighted totals itself.
+`ConjunctionDetail.brief` is a plain string (3–5 sentences, no markdown, typed out on the dashboard). `/api/ask` streams plain-prose tokens.
+Criteria names follow the product brief, not the mock's older names (UI renders names generically).
 
-## 6. Open questions
+## Honest limitations
 
-1. Lambda + API Gateway buffers responses: how will true SSE be delivered (Lambda response streaming / Function URL)? Lead decision.
-2. Negotiation ids across Lambda cold starts: in-memory map may be lost between `POST` and `GET stream`.
-3. Will `GET /api/conjunctions/:id` call the AI per request? Default is free templates; `AI_BRIEF_MODE=llm` enables the model with a content-hash cache.
-4. Score criteria names differ from the mock (spec says reserve 35 / cost 25 / mission impact 20 / Δv 20); UI renders names generically — confirm no copy depends on the old names.
-5. Bedrock model access/region and which model id to use for credits; default is a cheap Claude Haiku id, overridable via `BEDROCK_MODEL_ID`.
-6. `Conjunction` list in the mock returns `ConjunctionDetail` objects; real `/api/conjunctions` may return lighter items — Ask works either way but is better with `options`.
+* **Operator data is assumed.** The contract has no fuel, mass or mission-impact fields. Fuel reserve and mission impact
+  for the demo satellites are illustrative (`demo.py`, `profiles.py`) and the mediator says so; real values can be passed in.
+* **Without per-object burns from `maneuver.py`** the secondary's burn is estimated from the primary's (same Δv, scaled
+  propellant) and labelled as estimated.
+* A split burn is announced in text, but the contract's `agreement` has one `mover`, so it carries the larger share.
+* Cached demo text is tied to the exact situation it was recorded for; for anything else the live models or templates are used.
+* Model output still needs human review; nothing here sends a command. The AI cannot see anything outside the data it is given.
 
-## 7. Plan / status
+## Open questions for the team
 
-Built and tested (37 tests, `python -m pytest tests/ai`): negotiator, deterministic scoring, grounding guard, brief, ask, provider chain
-(Bedrock → Gemini → cache → templates). Remaining: wire into Lead's routers; try Bedrock live once credentials exist; tune prompts on
-real output; pre-record the three demo scenarios into `AI_CACHE_DIR` as an offline safety net.
+1. API Gateway buffers responses: how do we deliver real SSE on Lambda (response streaming / Function URL)?
+2. Negotiation ids across Lambda cold starts (in-memory map may vanish between `POST` and the stream).
+3. Who supplies fuel/mission data for real operators (even a small JSON keyed by NORAD id)?
+4. Cerebras: someone with a free key should run `python scripts/check_llm.py` once.
