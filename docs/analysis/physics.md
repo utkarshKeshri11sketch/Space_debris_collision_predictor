@@ -180,6 +180,27 @@ TEME from SGP4 is fine), the combined covariance in contract form (`sigmaMajorM`
 8. `spreadDvMs` = mean and standard deviation of the sampled Δv magnitudes. `seed` is deterministic per
    (noradId, event), so identical requests return identical results (cacheable).
 
+### 4.3 What the build changed (implemented and tested)
+
+- **Already-safe events:** when the unchanged trajectory already meets the targets, burns are costed
+  to double the miss distance. Without this, every burn comes out as 0 m/s.
+- **Mock fixtures are not self-consistent:** a 412 m miss with the mock covariance (186/74 m, HBR 58 m)
+  gives Pc ≈ 3e-7, not 3.1e-4. Our Pc follows the geometry. For a "critical" demo the screening data
+  needs a tighter miss or a larger covariance.
+- **Typical numbers** (ISS, Pc 4e-2, 130 m miss): a 0.03 m/s retrograde burn about 7.4 h before TCA
+  reaches about 1 km (about 4 kg of ISS propellant). A radial burn needs about 0.7 m/s.
+- **`spreadDvMs`** describes the fragments that stay in orbit (the cloud the globe draws). For an SL-16
+  collision that is mean ≈ 357 m/s, sd ≈ 583 m/s. Including NSBM's km/s tail, which escapes or
+  re-enters at once, would give sd ≈ 2 km/s.
+- **Shells** are 20 km to 2000 km, then 250 km.
+- **Timing** on the 33 482-object synthetic catalog (local laptop): `build_environment` about 1.2 s
+  (cache it), SL-16 collision about 0.6 s, explosion about 0.1 s.
+- **SL-16 collision, 25 y with launches:** 4 703 fragments, 3 secondary collisions (≈ 135–150 fragments
+  each, ≈ 835 km), and about 2 600 active satellites at higher risk in year 0.
+- **Dependencies:** `numpy` only. No SciPy and no `sgp4` inside `app/physics/maneuver.py` or
+  `cascade.py`.
+- **Tests:** `backend/tests/physics/` (24 tests), run with `pytest backend/tests/physics`.
+
 ## 5. Dependencies on other agents
 
 | Need | From | Detail |

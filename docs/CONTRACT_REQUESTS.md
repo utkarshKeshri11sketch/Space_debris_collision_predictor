@@ -32,3 +32,15 @@ each option's `newPc` use the same formula.
 NSBM fragment Δv for collisions has a standard deviation of about 100–200 m/s, against 38 m/s in the
 mock. `cascade.vert.glsl` scales kicks by `sd/100`, so the real cloud will look much wider. If it looks
 wrong in the demo, the shader scale should be clamped. The API values stay physical.
+
+## PHYS-4 · Physics → Lead: dependencies (FYI)
+
+`app/physics/maneuver.py` and `cascade.py` need only `numpy` (tested with numpy 2.x). Tests need
+`pytest`. `backend/tests/physics/conftest.py` adds `backend/` to `sys.path` until a project-wide pytest
+config exists.
+
+## PHYS-5 · Physics → Screening/Lead: demo fixture consistency (FYI)
+
+The mock `iss-cosmos` pair (412 m miss, covariance 186/74 m, HBR 58 m) gives Pc ≈ 3e-7, not the mock's
+3.1e-4. If the ISS demo must show a critical event, the screened miss or covariance has to support it.
+Don't hard-code the Pc.
