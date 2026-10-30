@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from ..models import Conjunction, ConjunctionDetail
 from ..physics import screening
@@ -7,8 +7,16 @@ router = APIRouter(prefix="/api/conjunctions", tags=["conjunctions"])
 
 
 @router.get("", response_model=list[Conjunction])
-def list_conjunctions(days: float = Query(7, ge=0, le=7), minPc: float = 1e-6):
-    return screening.screen(None, days, minPc)
+def list_conjunctions(response: Response, days: float = Query(7, ge=0, le=7),
+                      minPc: float = Query(1e-6, ge=0, le=1),
+                      noradId: int | None = Query(None, ge=1, le=999999999)):
+    events = screening.screen(noradId, days, minPc)
+    status = screening.screening_status()
+    response.headers["X-Screening-Complete"] = str(status.get("complete", False)).lower()
+    response.headers["X-Screening-Issues"] = str(status.get("issues", 0))
+    if "asOf" in status:
+        response.headers["X-Screening-As-Of"] = status["asOf"]
+    return events
 
 
 @router.get("/{conjunction_id}", response_model=ConjunctionDetail)
