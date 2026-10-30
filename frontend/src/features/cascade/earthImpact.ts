@@ -1,4 +1,4 @@
-import type { CascadeResult } from '../../api/types';
+import type { CascadeResult, CatalogObject } from '../../api/types';
 
 // Earth-impact and preparedness model for the Cascade Lab.
 // Everything here is derived on the client from an existing CascadeResult, so the API contract is
@@ -15,14 +15,14 @@ export function meanAltitudeKm(omm: Record<string, string | number>): number {
 }
 
 // Fragment lifetime τ(h) = τ_ref · exp((h − h_ref) / H), calibrated on two real fragment clouds:
-// - Cosmos 1408 (~480 km, 2021): ~63% of ~1,780 tracked fragments decayed within a year and the rest
-//   were expected down by ~2033 (SpaceNews, 2022) → τ ≈ 1 year.
-// - Fengyun-1C (~865 km, 2007): ~2,800 of 3,500+ fragments still catalogued after 19 years
-//   (Orbital Radar, 2026) → τ = 19 / −ln(0.8) ≈ 85 years.
+// - Cosmos 1408 (~480 km, Nov 2021): 1,122 of 1,783 tracked fragments had decayed by Aug 2022, about
+//   9 months later (SpaceNews, 2022) → τ = 0.75 / −ln(661 / 1783) ≈ 0.76 years.
+// - Fengyun-1C (~865 km, Jan 2007): NASA projects about half of the fragments still in orbit in 2033,
+//   26 years after the breakup (Liou, NASA NTRS 20150003820) → τ = 26 / ln 2 ≈ 37.5 years.
 // Fragments have a high area-to-mass ratio, so they decay faster than intact spacecraft, which ESA
 // puts at ~100–150 years from 800 km. Solar-cycle and thermosphere changes are ignored here.
-const LOW_ANCHOR = { altKm: 480, tauYears: 1 };
-const HIGH_ANCHOR = { altKm: 865, tauYears: 85 };
+const LOW_ANCHOR = { altKm: 480, tauYears: 0.75 / -Math.log(661 / 1783) };
+const HIGH_ANCHOR = { altKm: 865, tauYears: 26 / Math.LN2 };
 const SCALE_HEIGHT_KM =
   (HIGH_ANCHOR.altKm - LOW_ANCHOR.altKm) / Math.log(HIGH_ANCHOR.tauYears / LOW_ANCHOR.tauYears);
 
@@ -82,14 +82,49 @@ export interface EarthImpact {
   reentriesPerYear: number;
   satellitesPossiblyLost: number;
   services: ReturnType<typeof servicesNear>;
+  reenteredMassKg: number;
+  reentryMassKgPerYear: number;
+  aluminaKg: number;
 }
 
+// Breakup mass. OMM carries no mass, so these mirror the cascade simulator's own assumptions
+// (backend/app/physics/cascade.py: _MASS_BY_NORAD, _MASS_BY_TYPE, INTACT_TARGET_KG). A debris parent
+// is assumed to break up by striking an 800 kg satellite, and so is every secondary collision.
+const MASS_BY_NORAD_KG: Record<number, number> = { 22285: 8900, 25544: 420000 };
+const MASS_BY_TYPE_KG: Record<CascadeResult['parent']['type'], number> = {
+  PAYLOAD: 800,
+  ROCKET_BODY: 1400,
+  DEBRIS: 1,
+  UNKNOWN: 100,
+};
+const STRUCK_SATELLITE_KG = 800;
+
+export function breakupMassKg(parent: CascadeResult['parent']): number {
+  const mass = MASS_BY_NORAD_KG[parent.noradId] ?? MASS_BY_TYPE_KG[parent.type];
+  return parent.type === 'DEBRIS' ? mass + STRUCK_SATELLITE_KG : mass;
+}
+
+// Aluminium oxide formed on reentry. Ferreira et al. (GRL 2024): a 250 kg satellite that is ~30%
+// aluminium makes ~30 kg of Al2O3, i.e. 0.12 kg per kg reentered. Applied to all fragments as a model
+// estimate; rocket stages carry more aluminium, so this likely underestimates them.
+const ALUMINA_PER_KG = 30 / 250;
+// Context from the same paper: all reentries in 2022 made ~17 t; planned mega-constellations ~360 t/yr.
+export const ALUMINA_2022_KG = 17_000;
+export const ALUMINA_MEGACONSTELLATION_KG_PER_YEAR = 360_000;
+
 // Each fragment source (the breakup at year 0, then every secondary collision at its own altitude)
-// decays independently from the moment it happens.
+// decays independently from the moment it happens. Mass is spread evenly over a source's fragments.
 function sources(result: CascadeResult, parentAltKm: number, year: number) {
   return [
-    { year: 0, altKm: parentAltKm, fragments: result.fragmentCount },
-    ...result.secondaryCollisions.filter((collision) => collision.year <= year),
+    {
+      year: 0,
+      altKm: parentAltKm,
+      fragments: result.fragmentCount,
+      massKg: breakupMassKg(result.parent),
+    },
+    ...result.secondaryCollisions
+      .filter((collision) => collision.year <= year)
+      .map((collision) => ({ ...collision, massKg: STRUCK_SATELLITE_KG })),
   ];
 }
 
@@ -104,6 +139,11 @@ export function earthImpact(result: CascadeResult, year: number): EarthImpact {
   const created = active.reduce((sum, source) => sum + source.fragments, 0);
   const inOrbit = inOrbitAt(year);
   const lifetimeYears = fragmentLifetimeYears(parentAltKm);
+  const reenteredMassKg = active.reduce(
+    (sum, source) =>
+      sum + source.massKg * (1 - remainingFraction(source.altKm, year - source.year)),
+    0,
+  );
   return {
     parentAltKm,
     lifetimeYears,
@@ -126,7 +166,124 @@ export function earthImpact(result: CascadeResult, year: number): EarthImpact {
     // needs a replacement launch. This is an upper bound on satellites lost, not a count.
     satellitesPossiblyLost: active.length - 1,
     services: servicesNear(parentAltKm),
+    reenteredMassKg,
+    reentryMassKgPerYear: active.reduce(
+      (sum, source) =>
+        sum +
+        (source.massKg * remainingFraction(source.altKm, year - source.year)) /
+          fragmentLifetimeYears(source.altKm),
+      0,
+    ),
+    aluminaKg: reenteredMassKg * ALUMINA_PER_KG,
   };
+}
+
+// Weather, climate and Earth-observation missions, matched by catalog name prefix (CelesTrak names).
+const CLIMATE_MISSION =
+  /^(NOAA|METOP|SUOMI NPP|NPP|JPSS|LANDSAT|SENTINEL|FENGYUN 3|FY-3|TERRA|AQUA|AURA|DMSP|METEOR-M|GCOM|OCO|CRYOSAT|SMOS|SWOT|SARAL|GOSAT|OCEANSAT|EARTHCARE|SMAP|ICESAT|GRACE)\b/i;
+
+export interface BandSatellite {
+  noradId: number;
+  name: string;
+  altKm: number;
+}
+
+/** Real active payloads from the loaded catalog within the cloud's altitude band. */
+export function satellitesInBand(catalog: CatalogObject[], altKm: number) {
+  const inBand: BandSatellite[] = [];
+  for (const object of catalog) {
+    if (object.type !== 'PAYLOAD' || !object.active) continue;
+    const objectAlt = meanAltitudeKm(object.omm);
+    if (Math.abs(objectAlt - altKm) <= BAND_MARGIN_KM)
+      inBand.push({ noradId: object.noradId, name: object.name, altKm: objectAlt });
+  }
+  return {
+    activeCount: inBand.length,
+    climate: inBand
+      .filter((satellite) => CLIMATE_MISSION.test(satellite.name))
+      .sort((a, b) => Math.abs(a.altKm - altKm) - Math.abs(b.altKm - altKm)),
+  };
+}
+
+export interface AiStep {
+  when: string;
+  atYear: number;
+  title: string;
+  detail: string;
+  // 'OrbitSentinel' = this platform does it today; 'Research' = published AI work, not built here.
+  by: 'OrbitSentinel' | 'Research';
+}
+
+/** Where AI helps, step by step through the simulated scenario. Early steps quote the breakup year. */
+export function aiTimeline(result: CascadeResult, impact: EarthImpact): AiStep[] {
+  const point = nearestPoint(result, 0);
+  const altitude = Math.round(impact.parentAltKm);
+  const steps: AiStep[] = [
+    {
+      when: 'Hours',
+      atYear: 0,
+      title: `Breakup at ${altitude} km: classify it and size the cloud`,
+      detail:
+        'Neural networks trained on the NASA breakup model tell a collision from an explosion and estimate the fragment cloud from the first tracking passes, before the catalog catches up (AMOS 2025).',
+      by: 'Research',
+    },
+    {
+      when: 'Day 1',
+      atYear: 0,
+      title: `Re-screen ${point.satellitesAtRisk.toLocaleString('en-US')} satellites in the band`,
+      detail:
+        'Screen every satellite near the cloud against the new fragments, every catalog update.',
+      by: 'OrbitSentinel',
+    },
+    {
+      when: 'Week 1',
+      atYear: 0,
+      title: 'Agree who moves',
+      detail: `Close approaches rise ${point.extraConjunctionsPct.toFixed(1)}%. For each pair of active satellites, the Negotiator agrees who maneuvers and logs why, using published weights.`,
+      by: 'OrbitSentinel',
+    },
+  ];
+  for (const collision of result.secondaryCollisions.slice(0, 3))
+    steps.push({
+      when: `Year ${collision.year.toFixed(1)}`,
+      atYear: collision.year,
+      title: `Secondary collision at ${Math.round(collision.altKm)} km`,
+      detail: `${collision.fragments.toLocaleString('en-US')} new fragments. Repeat: classify, re-screen, negotiate. Each hit feeds the chain reaction.`,
+      by: 'OrbitSentinel',
+    });
+  if (result.secondaryCollisions.length > 3)
+    steps.push({
+      when: 'Later',
+      atYear: result.secondaryCollisions[3].year,
+      title: `${result.secondaryCollisions.length - 3} more secondary collisions`,
+      detail: 'The same loop runs for each one.',
+      by: 'OrbitSentinel',
+    });
+  steps.push(
+    {
+      when: 'Every year',
+      atYear: 0,
+      title: 'Forecast reentries',
+      detail: `About ${impact.reentriesPerYear.toLocaleString('en-US')} fragments a year reenter now. Machine-learning density models forecast the upper atmosphere better than standard models (Acciarini et al., 2024), which sharpens reentry windows for airspace warnings.`,
+      by: 'Research',
+    },
+    {
+      when: 'Years',
+      atYear: 0,
+      title: 'Rank what to remove first',
+      detail:
+        'Rank the dead objects in the band by how much collision risk they add. The first inspection mission to a dead rocket stage flew in 2024 (Astroscale ADRAS-J).',
+      by: 'Research',
+    },
+  );
+  return steps;
+}
+
+function nearestPoint(result: CascadeResult, year: number) {
+  return result.years.reduce(
+    (nearest, p) => (Math.abs(p.year - year) < Math.abs(nearest.year - year) ? p : nearest),
+    result.years[0],
+  );
 }
 
 export interface PreparednessAction {
@@ -140,10 +297,7 @@ export function preparednessActions(
   impact: EarthImpact,
   year: number,
 ): PreparednessAction[] {
-  const point = result.years.reduce(
-    (nearest, p) => (Math.abs(p.year - year) < Math.abs(nearest.year - year) ? p : nearest),
-    result.years[0],
-  );
+  const point = nearestPoint(result, year);
   const altitude = Math.round(impact.parentAltKm);
   const actions: PreparednessAction[] = [
     {
@@ -195,7 +349,7 @@ export function preparednessActions(
     {
       phase: 'Respond',
       title: 'Track reentries',
-      detail: `About ${impact.reentriesPerYear.toLocaleString('en-US')} fragments a year are reentering now. Most burn up, but large parts can reach the ground, as in Kenya (2024) and Poland (2025). Publish reentry windows and use controlled reentry for rocket stages.`,
+      detail: `About ${impact.reentriesPerYear.toLocaleString('en-US')} fragments a year are reentering now. Most burn up, but parts can reach the ground: an ISS battery-pallet part went through a Florida home (2024, NASA confirmed) and Falcon 9 debris fell in Poland (2025). Publish reentry windows and use controlled reentry for rocket stages.`,
     },
     {
       phase: 'Respond',

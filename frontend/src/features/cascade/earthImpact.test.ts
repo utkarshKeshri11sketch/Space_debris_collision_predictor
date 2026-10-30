@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { CascadeResult } from '../../api/types';
 import {
+  aiTimeline,
+  breakupMassKg,
   earthImpact,
+  satellitesInBand,
   fragmentLifetimeYears,
   meanAltitudeKm,
   persistenceClass,
@@ -45,10 +48,11 @@ describe('cascade Earth-impact model', () => {
     expect(meanAltitudeKm({ MEAN_MOTION: 0 })).toBeNaN();
   });
   it('reproduces the two calibration clouds', () => {
-    expect(fragmentLifetimeYears(480)).toBeCloseTo(1, 6);
-    expect(fragmentLifetimeYears(865)).toBeCloseTo(85, 6);
-    // Fengyun-1C: ~80% of fragments still catalogued 19 years after the breakup.
-    expect(remainingFraction(865, 19)).toBeCloseTo(0.8, 2);
+    // Cosmos 1408: 661 of 1,783 tracked fragments left ~9 months after the breakup.
+    expect(remainingFraction(480, 0.75)).toBeCloseTo(661 / 1783, 6);
+    // Fengyun-1C: NASA projects about half still in orbit 26 years after the breakup.
+    expect(remainingFraction(865, 26)).toBeCloseTo(0.5, 6);
+    expect(fragmentLifetimeYears(865)).toBeCloseTo(37.5, 1);
   });
   it('classifies persistence by altitude', () => {
     expect(persistenceClass(450)).toBe('years');
@@ -79,5 +83,49 @@ describe('cascade Earth-impact model', () => {
     expect(lowActions.map((action) => action.title)).not.toContain('Plan a disposal burn');
     expect(lowActions.map((action) => action.title)).not.toContain('Remove large derelicts');
     expect(lowActions.every((action) => action.detail.length > 0)).toBe(true);
+    // Only confirmed ground-impact events are cited.
+    expect(JSON.stringify(high)).not.toContain('Kenya');
+    expect(JSON.stringify(high)).toContain('Florida');
+  });
+  it('tracks reentered mass and alumina, conserving the breakup mass', () => {
+    const result = cascade(840);
+    expect(breakupMassKg(result.parent)).toBe(1400);
+    expect(breakupMassKg({ ...result.parent, noradId: 22285 })).toBe(8900);
+    expect(breakupMassKg({ ...result.parent, type: 'DEBRIS' })).toBe(801);
+    const early = earthImpact(result, 4);
+    // Same share of mass as of fragments (the fragment count is rounded to whole pieces).
+    expect(Math.abs(early.reenteredMassKg - 1400 * (early.reentered / 1000))).toBeLessThan(1.4);
+    expect(early.aluminaKg).toBeCloseTo(early.reenteredMassKg * 0.12, 6);
+    // Far in the future everything reenters: primary 1,400 kg + one 800 kg secondary collision.
+    expect(earthImpact(result, 5000).reenteredMassKg).toBeCloseTo(2200, 3);
+  });
+  it('lists real active payloads in the band and picks out climate missions', () => {
+    const object = (noradId: number, name: string, altKm: number, active = true) => ({
+      noradId,
+      name,
+      type: 'PAYLOAD' as const,
+      active,
+      maneuverable: false,
+      omm: { MEAN_MOTION: meanMotionAt(altKm) },
+    });
+    const band = satellitesInBand(
+      [
+        object(43013, 'NOAA 20', 824),
+        object(2, 'STARLINK-1', 550),
+        object(3, 'IRIDIUM 180', 780),
+        object(4, 'METOP-B', 817, false),
+      ],
+      840,
+    );
+    expect(band.activeCount).toBe(2);
+    expect(band.climate.map((satellite) => satellite.name)).toEqual(['NOAA 20']);
+  });
+  it('builds an AI timeline from the scenario, separating our features from research', () => {
+    const result = cascade(840);
+    const steps = aiTimeline(result, earthImpact(result, 10));
+    // Day-1 steps quote the breakup year, not wherever the slider is.
+    expect(steps.some((step) => step.title.includes('Re-screen 10 satellites'))).toBe(true);
+    expect(steps.some((step) => step.title === 'Secondary collision at 840 km')).toBe(true);
+    expect(new Set(steps.map((step) => step.by))).toEqual(new Set(['OrbitSentinel', 'Research']));
   });
 });
