@@ -1,0 +1,7 @@
+{
+  "generatedAt": "2026-10-30T14:43:08.705161+00:00",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "files": 12,
+  "note": "LLM answers recorded after validation; regenerate with scripts/build_ai_cache.py"
+}

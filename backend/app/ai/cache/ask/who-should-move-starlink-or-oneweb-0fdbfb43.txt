@@ -1,0 +1,1 @@
+STARLINK-31502 should maneuver. The conjunction is high risk with a miss distance of 690 m, relative speed 12.8 km/s and a 1 in 11 494 chance of collision. The recommended prograde burn of 0.42 m/s uses 0.18 kg propellant, increasing miss distance to about 4 200 m and reducing collision probability to roughly 2.3 × 10⁻⁸. A human flight director must approve the maneuver.

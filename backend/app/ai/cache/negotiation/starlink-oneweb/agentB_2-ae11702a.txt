@@ -1,0 +1,1 @@
+We acknowledge that the required burn for ONEWEB-0461 consumes far less propellant than a STARLINK-31502 maneuver. However, STARLINK-31502 retains a substantially larger fuel reserve (78% versus our 41%) and would suffer a far lower mission impact (15% versus our 45% loss of a scheduled coverage window), so we request that STARLINK-31502 perform the avoidance burn.

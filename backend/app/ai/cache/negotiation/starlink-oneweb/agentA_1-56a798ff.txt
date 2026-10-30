@@ -1,0 +1,1 @@
+We note that the required burn for ONEWEB-0461 uses only about 0.03 kg of propellant, compared with 0.18 kg for our STARLINK-31502, so the maneuver would consume significantly less mass for your spacecraft. Given this propellant advantage, we respectfully request that ONEWEB-0461 perform the avoidance burn.

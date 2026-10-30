@@ -1,0 +1,1 @@
+We acknowledge that STARLINK-31502 retains a larger fuel reserve, with 78 % versus ONEWEB-0461's 41 %, reducing our operational risk. However, the avoidance burn would consume only about 0.03 kg of propellant for ONEWEB-0461 compared with 0.18 kg for our spacecraft, making the maneuver far lighter for your vehicle.
