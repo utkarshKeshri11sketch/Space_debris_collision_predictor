@@ -5,7 +5,7 @@ import { AdditiveBlending, BufferGeometry, Group, Mesh, MeshBasicMaterial, Vecto
 import { json2satrec, propagate, type OMMJsonObject } from 'satellite.js';
 import type { CatalogObject, Conjunction } from '../api/types';
 import { useSimStore } from '../sim/store';
-import type { PositionBuffers } from './ObjectCloud';
+import { readDisplayedPosition, type PositionBuffers } from './ObjectCloud';
 import SelectedModel from './SelectedModel';
 
 const EARTH_KM = 6378.137;
@@ -65,11 +65,7 @@ export function SelectedObject({
     trail.setDrawRange(0, Math.max(0, Math.floor(points.length * reveal.current)));
     const positions = buffers.current.current;
     if (group.current && positions.length > index * 3 + 2)
-      group.current.position.set(
-        positions[index * 3],
-        positions[index * 3 + 1],
-        positions[index * 3 + 2],
-      );
+      readDisplayedPosition(buffers.current, index, group.current.position);
     if (ring.current) {
       if (!reduced) ring.current.rotation.z = clock.elapsedTime * 0.12;
       (ring.current.material as MeshBasicMaterial).opacity = reduced ? 0.72 : 0.66 + Math.sin(clock.elapsedTime * 2.8) * 0.18;

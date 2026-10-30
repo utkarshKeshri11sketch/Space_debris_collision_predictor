@@ -143,7 +143,7 @@ export default function App() {
     (c) => c.primary.maneuverable && c.secondary.maneuverable,
   )?.id;
   return (
-    <div className={`application mode-${mode} mobile-${mobilePanel}`}>
+    <div className={`application mode-${mode} mobile-${mobilePanel}${selectedId !== null ? ' has-selection' : ''}`}>
       <SimClockTicker />
       <a className="skip-link" href="#workspace">
         Skip to mission data

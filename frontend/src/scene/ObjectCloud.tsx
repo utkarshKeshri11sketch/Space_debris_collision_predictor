@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { NormalBlending, BufferAttribute, BufferGeometry, ShaderMaterial, Vector3 } from 'three';
+import { NormalBlending, BufferAttribute, BufferGeometry, MathUtils, ShaderMaterial, Vector3 } from 'three';
 import type { CatalogObject } from '../api/types';
 import { createPropagationClient } from '../sim/propagation';
 import { useSimStore } from '../sim/store';
@@ -10,6 +10,16 @@ import fragment from './objects.frag.glsl?raw';
 export type LayerVisibility = { payload: boolean; debris: boolean; rocket: boolean };
 export type OrbitRegime = 'ALL' | 'LEO' | 'MEO' | 'GEO';
 export type PositionBuffers = { current: Float32Array; previous: Float32Array; updatedAt: number };
+/** Match the point shader's interpolation so detail and camera never lead the rendered orbit. */
+export function readDisplayedPosition(buffers: PositionBuffers, index: number, target: Vector3) {
+  const blend = Math.min((performance.now() - buffers.updatedAt) / 200, 1);
+  const offset = index * 3;
+  return target.set(
+    MathUtils.lerp(buffers.previous[offset], buffers.current[offset], blend),
+    MathUtils.lerp(buffers.previous[offset + 1], buffers.current[offset + 1], blend),
+    MathUtils.lerp(buffers.previous[offset + 2], buffers.current[offset + 2], blend),
+  );
+}
 const regimeCode = { ALL: 0, LEO: 1, MEO: 2, GEO: 3 };
 
 export function initialPositions(catalog: CatalogObject[]) {
@@ -56,7 +66,7 @@ export default function ObjectCloud({ catalog, layers, regime, buffers, onWorker
     buffers.current = { current: initial, previous: initial, updatedAt: performance.now() };
     return result;
   }, [catalog, buffers]);
-  const uniforms = useMemo(() => ({ uBlend: { value: 1 }, uPixelRatio: { value: Math.min(gl.getPixelRatio(), 1.75) }, uTime: { value: 0 }, uMotion: { value: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1 }, uLayers: { value: new Vector3(1, 1, 1) }, uRegime: { value: 0 }, uSelectedIndex: { value: -1 }, uHoveredIndex: { value: -1 } }), [gl]);
+  const uniforms = useMemo(() => ({ uBlend: { value: 1 }, uPixelRatio: { value: Math.min(gl.getPixelRatio(), 1.75) }, uTime: { value: 0 }, uMotion: { value: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1 }, uLayers: { value: new Vector3(1, 1, 1) }, uRegime: { value: 0 }, uSelectedIndex: { value: -1 }, uHoveredIndex: { value: -1 }, uCatalogVisibility: { value: 1 } }), [gl]);
   useEffect(() => {
     const client = createPropagationClient();
     let disposed = false;
@@ -81,7 +91,7 @@ export default function ObjectCloud({ catalog, layers, regime, buffers, onWorker
     return () => { disposed = true; clearTimeout(timer); client.dispose(); };
   }, [catalog, geometry, buffers, onWorkerError]);
   useEffect(() => () => geometry.dispose(), [geometry]);
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     if (!material.current) return;
     uniforms.uBlend.value = Math.min((performance.now() - buffers.current.updatedAt) / 200, 1);
     uniforms.uTime.value = clock.elapsedTime;
@@ -89,6 +99,7 @@ export default function ObjectCloud({ catalog, layers, regime, buffers, onWorker
     uniforms.uRegime.value = regimeCode[regime];
     uniforms.uSelectedIndex.value = selectedIndex;
     uniforms.uHoveredIndex.value = hoveredIndex;
+    uniforms.uCatalogVisibility.value = MathUtils.damp(uniforms.uCatalogVisibility.value, selectedIndex >= 0 ? 0 : 1, uniforms.uMotion.value ? 10 : 35, delta);
   });
   return <points geometry={geometry} frustumCulled={false} raycast={() => null}>
     <shaderMaterial ref={material} vertexShader={vertex} fragmentShader={fragment} uniforms={uniforms} transparent depthWrite={false} blending={NormalBlending} />

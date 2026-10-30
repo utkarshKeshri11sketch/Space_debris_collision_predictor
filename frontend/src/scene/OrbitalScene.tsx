@@ -7,7 +7,7 @@ import { useCatalog } from '../api/hooks';
 import type { CatalogObject, CascadeResult, Conjunction } from '../api/types';
 import { useSimStore } from '../sim/store';
 import Earth, { EarthFallback, solarDirection } from './Earth';
-import ObjectCloud, { type LayerVisibility, type OrbitRegime, type PositionBuffers } from './ObjectCloud';
+import ObjectCloud, { readDisplayedPosition, type LayerVisibility, type OrbitRegime, type PositionBuffers } from './ObjectCloud';
 import { Encounter, SelectedObject, objectPositionAt } from './OrbitTrails';
 import DebrisCascade from './DebrisCascade';
 import './scene.css';
@@ -94,7 +94,7 @@ function CameraDirector({ props, catalog, idToIndex, buffers, controls }: { prop
   selectedIdRef.current = props.selectedId;
   const lastFocusNonce = useRef(0);
   const userDragged = useRef(false);
-  const followed = useRef({ id: null as number | null, position: new Vector3(), camera: new Vector3(), target: new Vector3() });
+  const followed = useRef({ id: null as number | null, position: new Vector3(), camera: new Vector3(), target: new Vector3(), offset: new Vector3(), radial: new Vector3(), nextRadial: new Vector3(), rotation: new Quaternion() });
   const tween = useRef({ startTime: 0, duration: 2400, active: false, start: new Vector3(), end: new Vector3(), startTarget: new Vector3(), endTarget: new Vector3(), rotation: new Quaternion(), identity: new Quaternion(), direction: new Vector3(), position: new Vector3(), target: new Vector3() });
   const introDeadline = useRef(performance.now() + 6000);
   useEffect(() => {
@@ -124,10 +124,14 @@ function CameraDirector({ props, catalog, idToIndex, buffers, controls }: { prop
       end = selected.clone().normalize().addScaledVector(overview, 0.5).normalize().multiplyScalar(props.mode === 'negotiator' ? 4.7 : 3.2);
       target.copy(selected).multiplyScalar(0.50);
     } else if (props.mode === 'mission' && selectedId && index >= 0) {
-      const positions = buffers.current.current;
-      const selected = new Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
-      end = selected.clone().normalize().multiplyScalar(Math.max(2.15, selected.length() + 0.95)).addScaledVector(overview, 0.35);
-      target.copy(selected).multiplyScalar(0.82);
+      const selected = readDisplayedPosition(buffers.current, index, new Vector3());
+      // Focus at the spacecraft, with an outward offset that keeps the camera above Earth.
+      const outward = selected.clone().normalize();
+      const tangent = new Vector3().crossVectors(outward, new Vector3(0, 1, 0));
+      if (tangent.lengthSq() < 0.01) tangent.set(1, 0, 0);
+      tangent.normalize();
+      end = selected.clone().addScaledVector(outward, 0.72).addScaledVector(tangent, 0.28);
+      target.copy(selected);
     }
     if (props.mode === 'cascade') end.copy(overview).multiplyScalar(4.1);
     if (props.introActive && animation.startTime === 0) controls.current.setLookAt(overview.x * 11, overview.y * 11, overview.z * 11, 0, 0, 0, false);
@@ -149,15 +153,20 @@ function CameraDirector({ props, catalog, idToIndex, buffers, controls }: { prop
         const coordinates = buffers.current.current;
         if (index >= 0 && coordinates.length > index * 3 + 2) {
           const follow = followed.current;
-          const x = coordinates[index * 3], y = coordinates[index * 3 + 1], z = coordinates[index * 3 + 2];
-          if (follow.id === props.selectedId) {
-            const dx = (x - follow.position.x) * 0.82, dy = (y - follow.position.y) * 0.82, dz = (z - follow.position.z) * 0.82;
-            if (dx || dy || dz) {
-              controls.current.getPosition(follow.camera);
-              controls.current.getTarget(follow.target);
-              controls.current.setLookAt(follow.camera.x + dx, follow.camera.y + dy, follow.camera.z + dz, follow.target.x + dx, follow.target.y + dy, follow.target.z + dz, false);
-            }
-          }
+          readDisplayedPosition(buffers.current, index, animation.position);
+          const { x, y, z } = animation.position;
+          controls.current.getPosition(follow.camera);
+          controls.current.getTarget(follow.target);
+          follow.offset.subVectors(follow.camera, follow.target);
+          follow.radial.copy(follow.id === props.selectedId ? follow.position : animation.endTarget).normalize();
+          follow.nextRadial.set(x, y, z).normalize();
+          // Rotate the follow offset with the orbital plane so fast playback cannot carry
+          // the camera through Earth when the spacecraft reaches the opposite hemisphere.
+          follow.rotation.setFromUnitVectors(follow.radial, follow.nextRadial);
+          follow.offset.applyQuaternion(follow.rotation);
+          follow.camera.set(x + follow.offset.x, y + follow.offset.y, z + follow.offset.z);
+          if (follow.camera.length() < 1.12) follow.camera.normalize().multiplyScalar(1.12);
+          controls.current.setLookAt(follow.camera.x, follow.camera.y, follow.camera.z, x, y, z, false);
           follow.position.set(x, y, z);
           follow.id = props.selectedId;
         }
@@ -175,7 +184,7 @@ function CameraDirector({ props, catalog, idToIndex, buffers, controls }: { prop
     animation.identity.identity().slerp(animation.rotation, progress);
     animation.direction.copy(animation.start).normalize().applyQuaternion(animation.identity);
     const radius = animation.start.length() + (animation.end.length() - animation.start.length()) * progress;
-    animation.position.copy(animation.direction).multiplyScalar(Math.max(radius, 2.2));
+    animation.position.copy(animation.direction).multiplyScalar(Math.max(radius, 1.12));
     animation.target.lerpVectors(animation.startTarget, animation.endTarget, progress);
     controls.current.setLookAt(animation.position.x, animation.position.y, animation.position.z, animation.target.x, animation.target.y, animation.target.z, false);
     camera.updateMatrixWorld();
@@ -184,13 +193,19 @@ function CameraDirector({ props, catalog, idToIndex, buffers, controls }: { prop
   return null;
 }
 
-function ObjectPicker({ catalog, buffers, layers, regime, onSelect, onHover }: { catalog: CatalogObject[]; buffers: React.MutableRefObject<PositionBuffers>; layers: LayerVisibility; regime: OrbitRegime; onSelect: (id: number | null) => void; onHover: (index: number, x: number, y: number) => void }) {
+function ObjectPicker({ catalog, buffers, layers, regime, selectedId, onSelect, onHover }: { catalog: CatalogObject[]; buffers: React.MutableRefObject<PositionBuffers>; layers: LayerVisibility; regime: OrbitRegime; selectedId: number | null; onSelect: (id: number | null) => void; onHover: (index: number, x: number, y: number) => void }) {
   const { gl, camera, size } = useThree();
   const grid = useRef(new Map<number, number[]>());
   const screen = useMemo(() => new Float32Array(catalog.length * 2), [catalog]);
   const lastBuild = useRef(-1), pointer = useRef({ x: -100, y: -100 }), lastHovered = useRef(-1);
   const vector = useMemo(() => new Vector3(), []);
   const columns = Math.ceil(size.width / 16) + 1;
+  useEffect(() => {
+    grid.current.clear();
+    lastBuild.current = -1;
+    lastHovered.current = -1;
+    onHover(-1, 0, 0);
+  }, [selectedId, onHover]);
   useFrame(({ clock }) => {
     if (clock.elapsedTime - lastBuild.current < 0.35 || !catalog.length) return;
     lastBuild.current = clock.elapsedTime;
@@ -199,6 +214,7 @@ function ObjectPicker({ catalog, buffers, layers, regime, onSelect, onHover }: {
     const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
     for (let index = 0; index < catalog.length; index++) {
       const object = catalog[index];
+      if (selectedId !== null && object.noradId !== selectedId) continue;
       if ((object.type === 'PAYLOAD' && !layers.payload) || (object.type === 'DEBRIS' && !layers.debris) || (object.type === 'ROCKET_BODY' && !layers.rocket)) continue;
       const px = positions[index * 3], py = positions[index * 3 + 1], pz = positions[index * 3 + 2];
       const radius = Math.hypot(px, py, pz);
@@ -273,15 +289,15 @@ function SceneContents({ props, onWorkerError, onHover, hoveredId, debug }: { pr
     <SolarLighting />
     <Starfield quality={props.quality} />
     <SceneBoundary fallback={<EarthFallback />}><Earth quality={props.quality} /></SceneBoundary>
-    <RegimeRing />
+    {currentId === null && <RegimeRing />}
     {catalog.length > 0 && <ObjectCloud catalog={catalog} layers={props.layers} regime={props.regime} buffers={buffers} selectedIndex={currentId === null ? -1 : selectedIndex} hoveredIndex={hoveredIndex} onWorkerError={onWorkerError} />}
-    {props.density && <DensityShells />}
+    {props.density && currentId === null && <DensityShells />}
     {selectedIndex >= 0 && <SelectedObject key={displayId} object={catalog[selectedIndex]} index={selectedIndex} buffers={buffers} exiting={currentId === null} />}
     {props.conjunction && primary && props.mode !== 'mission' && <Encounter conjunction={props.conjunction} primary={primary} replayProgress={props.replayProgress} previewBurn={props.previewBurn} />}
     {props.cascade && props.mode === 'cascade' && <DebrisCascade result={props.cascade} year={props.cascadeYear} />}
-    <CameraControls ref={controls} minDistance={1.7} maxDistance={14} smoothTime={0.3} draggingSmoothTime={0.12} dollySpeed={0.6} />
+    <CameraControls ref={controls} minDistance={currentId === null ? 1.7 : 0.4} maxDistance={14} smoothTime={0.3} draggingSmoothTime={0.12} dollySpeed={0.6} />
     <CameraDirector props={props} catalog={catalog} idToIndex={idToIndex} buffers={buffers} controls={controls} />
-    <ObjectPicker catalog={catalog} buffers={buffers} layers={props.layers} regime={props.regime} onSelect={props.onSelect} onHover={onHover} />
+    <ObjectPicker catalog={catalog} buffers={buffers} layers={props.layers} regime={props.regime} selectedId={currentId} onSelect={props.onSelect} onHover={onHover} />
     {debug && <><Stats className="scene-stats" /><DrawCallReadout /></>}
   </>;
 }

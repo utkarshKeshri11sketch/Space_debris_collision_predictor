@@ -707,6 +707,19 @@ body {
   overflow: hidden;
   animation: inspector-arrive 0.48s cubic-bezier(0.18, 0.78, 0.2, 1);
 }
+.mission-left, .mission-metrics, .scene-caption, .mobile-panel-tabs {
+  transition: opacity 0.35s ease, transform 0.5s ease, visibility 0s;
+}
+.mode-mission.has-selection .mission-left,
+.mode-mission.has-selection .mission-metrics,
+.mode-mission.has-selection .scene-caption,
+.mode-mission.has-selection .mobile-panel-tabs {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(10px);
+  transition: opacity 0.35s ease, transform 0.5s ease, visibility 0s linear 0.35s;
+}
 .inspector-identity, .inspector-altitude, .inspector-metrics, .inspector-orbit, .inspector-record, .inspector-focus, .inspector-conjunction { animation: inspector-row 0.46s both; }
 .inspector-altitude { animation-delay: 0.07s; }
 .inspector-metrics { animation-delay: 0.13s; }

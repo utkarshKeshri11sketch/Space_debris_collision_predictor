@@ -2,6 +2,7 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { DoubleSide, Group, MathUtils } from 'three';
 import type { CatalogObject } from '../api/types';
+import { useSimStore } from '../sim/store';
 
 type Variant = 'iss' | 'starlink' | 'cubesat' | 'satellite' | 'rocket' | 'debris';
 
@@ -45,9 +46,14 @@ export default function SelectedModel({ object, exiting, reduced }: { object: Ca
     // A small, damped overshoot gives the deployment a spring feel without a second animation loop.
     const overshoot = reduced || exiting ? 0 : Math.sin(Math.min(elapsed.current * 9, Math.PI * 2)) * Math.exp(-elapsed.current * 4) * 0.14;
     if (root.current) {
-      root.current.scale.setScalar(Math.max(0.001, t + overshoot));
-      root.current.rotation.y += reduced ? 0 : delta * (variant === 'debris' || variant === 'rocket' ? 0.18 : 0.045);
-      if (variant === 'debris' || variant === 'rocket') root.current.rotation.z += reduced ? 0 : delta * 0.09;
+      // Models are enlarged illustrations in Earth-radius units, not physical spacecraft dimensions.
+      root.current.scale.setScalar(Math.max(0.001, t + overshoot) * 0.65);
+      const simulation = useSimStore.getState();
+      // No attitude telemetry is supplied: illustrate one turn per orbital period. Deriving
+      // phase from the shared clock makes speed, pause and timeline scrubbing agree with SGP4.
+      const phase = reduced ? 0 : (simulation.timeMs - simulation.epochMs) / 86400000 * Number(object.omm.MEAN_MOTION) * Math.PI * 2;
+      root.current.rotation.y = 0.35 + phase;
+      root.current.rotation.z = variant === 'debris' || variant === 'rocket' ? 0.2 + phase * 0.5 : 0.18;
     }
     const unfold = reduced ? t : MathUtils.smoothstep(Math.max(0, elapsed.current - 0.28), 0, 0.9) * t;
     if (left.current) left.current.rotation.y = -Math.PI * 0.48 * (1 - unfold);
