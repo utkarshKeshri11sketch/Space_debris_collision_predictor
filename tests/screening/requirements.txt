@@ -1,0 +1,5 @@
+# Runtime dependencies for app/physics/screening.py; Lead owns global pins.
+numpy>=2.0,<3
+sgp4>=2.25,<3
+# Local verification only.
+pytest>=8,<10
