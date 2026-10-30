@@ -110,7 +110,11 @@ export function EarthImpactPanel({ result, year }: { result: CascadeResult; year
             </span>
           </li>
           <li>
-            <b>Up to {impact.satellitesPossiblyLost} replacement launches</b>
+            <b>
+              {impact.satellitesPossiblyLost
+                ? `Up to ${impact.satellitesPossiblyLost} replacement ${impact.satellitesPossiblyLost === 1 ? 'launch' : 'launches'}`
+                : 'No replacement launches yet'}
+            </b>
             <span>
               Each secondary collision can destroy a working satellite, and every replacement adds
               launch soot and a future reentry.
