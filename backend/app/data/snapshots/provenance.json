@@ -1,0 +1,25 @@
+{
+  "sourceBytes": 14544697,
+  "syncedAt": "2025-07-10T18:06:17Z",
+  "objectCount": 28124,
+  "sourceRepository": "https://github.com/shashwatak/satellite-js",
+  "sourcePath": "test/omm.json",
+  "originalFormat": "Space-Track OMM JSON",
+  "sourceGitBlobSha1": "715c11f79e35282e5b1735968761db0a8edaaffc",
+  "compressedSha256": "4a0384ab5f7a8cfa571688cb11c22a9a8ffcdb0a346ada42ce5562e807571683",
+  "syncedAtBasis": "Latest upstream CREATION_DATE; original download time unknown",
+  "coverage": "Historical archive, not a current full public catalog",
+  "activity": "No OPS_STATUS_CODE or active roster available: active=false means unverified, not proven inactive",
+  "transformations": [
+    "Selected original OMM dynamics/identity fields without changing values",
+    "Copied OBJECT_TYPE and COUNTRY_CODE to internal metadata",
+    "Removed unused TLE strings without parsing",
+    "Compressed JSON with gzip"
+  ],
+  "byType": {
+    "PAYLOAD": 14468,
+    "DEBRIS": 10419,
+    "ROCKET_BODY": 2173,
+    "UNKNOWN": 1064
+  }
+}
