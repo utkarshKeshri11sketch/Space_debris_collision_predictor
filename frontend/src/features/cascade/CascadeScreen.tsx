@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useCascade, useCatalog } from '../../api/hooks';
 import type { CascadeResult } from '../../api/types';
 import { formatNumber } from '../../lib/format';
+import { EarthImpactPanel, PreparednessPanel } from './EarthImpactPanels';
 
 interface Props {
   onResult: (result: CascadeResult | undefined) => void;
@@ -108,6 +109,7 @@ export default function CascadeScreen({ onResult, onYear }: Props) {
   const [playing, setPlaying] = useState(false);
   const [activeLength, setActiveLength] = useState(25);
   const [result, setResult] = useState<CascadeResult | undefined>();
+  const [view, setView] = useState<'orbit' | 'earth' | 'prevent'>('orbit');
   useEffect(() => {
     if (whatIfNorad && candidates.some((object) => object.noradId === whatIfNorad)) {
       if (!autoRan.current) setNoradId(whatIfNorad);
@@ -337,65 +339,95 @@ export default function CascadeScreen({ onResult, onYear }: Props) {
         ) : (
           <>
             <h2 className="feature-title">Simulation results</h2>
-            <div className="cascade-fragment-stat">
-              <strong>{formatNumber(result.fragmentCount)}</strong>
-              <span>new fragments &gt; 10 cm</span>
+            <div
+              className="feature-segmented cascade-view-tabs"
+              role="group"
+              aria-label="Result view"
+            >
+              {(
+                [
+                  ['orbit', 'Orbit'],
+                  ['earth', 'Earth impact'],
+                  ['prevent', 'Prevent & prepare'],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  className={view === key ? 'active' : ''}
+                  aria-pressed={view === key}
+                  onClick={() => setView(key)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            <dl className="cascade-impact-stats">
-              <div>
-                <dt>Satellites at higher risk</dt>
-                <dd>{formatNumber(current?.satellitesAtRisk ?? 0)}</dd>
-              </div>
-              <div>
-                <dt>Extra close approaches</dt>
-                <dd>
-                  +{(current?.extraConjunctionsPct ?? 0).toFixed(1)}
-                  <small>%</small>
-                </dd>
-              </div>
-              <div>
-                <dt>Secondary collisions</dt>
-                <dd>
-                  {collisionCount}
-                  <small> events</small>
-                </dd>
-              </div>
-            </dl>
-            <section className="feature-section">
-              <div className="feature-subheading">
-                <h3>Tracked population</h3>
-                <span>Objects &gt; 10 cm</span>
-              </div>
-              <GrowthChart result={result} year={year} />
-            </section>
-            <div className="cascade-event-list">
-              <span className="eyebrow">Secondary events</span>
-              {result.secondaryCollisions.length ? (
-                result.secondaryCollisions.map((collision, index) => (
-                  <div key={index} className={collision.year <= year ? 'occurred' : ''}>
-                    <i />
-                    <span>
-                      Year {collision.year.toFixed(1)}
-                      <small>{collision.altKm.toFixed(0)} km altitude</small>
-                    </span>
-                    <b>
-                      +{formatNumber(collision.fragments)}
-                      <small>fragments</small>
-                    </b>
+            {view === 'earth' && <EarthImpactPanel result={result} year={year} />}
+            {view === 'prevent' && <PreparednessPanel result={result} year={year} />}
+            {view === 'orbit' && (
+              <>
+                <div className="cascade-fragment-stat">
+                  <strong>{formatNumber(result.fragmentCount)}</strong>
+                  <span>new fragments &gt; 10 cm</span>
+                </div>
+                <dl className="cascade-impact-stats">
+                  <div>
+                    <dt>Satellites at higher risk</dt>
+                    <dd>{formatNumber(current?.satellitesAtRisk ?? 0)}</dd>
                   </div>
-                ))
-              ) : (
-                <p className="feature-footnote">No secondary collision events in this scenario.</p>
-              )}
-            </div>
-            <p className="feature-footnote cascade-explanation">
-              At year {Math.round(year)}, this breakup adds{' '}
-              {formatNumber(
-                Math.max(0, (current?.trackedTotal ?? 0) - (current?.baselineTotal ?? 0)),
-              )}{' '}
-              tracked objects above the baseline. The model illustrates why avoiding the first
-              collision matters.
-            </p>
+                  <div>
+                    <dt>Extra close approaches</dt>
+                    <dd>
+                      +{(current?.extraConjunctionsPct ?? 0).toFixed(1)}
+                      <small>%</small>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Secondary collisions</dt>
+                    <dd>
+                      {collisionCount}
+                      <small> events</small>
+                    </dd>
+                  </div>
+                </dl>
+                <section className="feature-section">
+                  <div className="feature-subheading">
+                    <h3>Tracked population</h3>
+                    <span>Objects &gt; 10 cm</span>
+                  </div>
+                  <GrowthChart result={result} year={year} />
+                </section>
+                <div className="cascade-event-list">
+                  <span className="eyebrow">Secondary events</span>
+                  {result.secondaryCollisions.length ? (
+                    result.secondaryCollisions.map((collision, index) => (
+                      <div key={index} className={collision.year <= year ? 'occurred' : ''}>
+                        <i />
+                        <span>
+                          Year {collision.year.toFixed(1)}
+                          <small>{collision.altKm.toFixed(0)} km altitude</small>
+                        </span>
+                        <b>
+                          +{formatNumber(collision.fragments)}
+                          <small>fragments</small>
+                        </b>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="feature-footnote">
+                      No secondary collision events in this scenario.
+                    </p>
+                  )}
+                </div>
+                <p className="feature-footnote cascade-explanation">
+                  At year {Math.round(year)}, this breakup adds{' '}
+                  {formatNumber(
+                    Math.max(0, (current?.trackedTotal ?? 0) - (current?.baselineTotal ?? 0)),
+                  )}{' '}
+                  tracked objects above the baseline. The model illustrates why avoiding the first
+                  collision matters.
+                </p>
+              </>
+            )}
           </>
         )}
       </aside>
