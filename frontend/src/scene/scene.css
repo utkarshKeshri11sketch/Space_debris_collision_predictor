@@ -15,3 +15,25 @@
 .scene-stats { position: absolute !important; top: 88px !important; left: 280px !important; }
 .scene-diagnostics { position: absolute; top: 138px; left: 280px; padding: 6px 8px; border: 1px solid #30353d; border-radius: 2px; background: #11151a; color: #a9b3c6; font: 10px 'IBM Plex Mono', monospace; }
 @media (max-width: 767px) { .scene-worker-notice { top: 90px; bottom: auto; font-size: 10px; } .scene-object-label { font-size: 11px; } }
+.scene-hover-label {
+  position: absolute;
+  z-index: 8;
+  pointer-events: none;
+  max-width: 220px;
+  padding: 8px 11px;
+  border: 1px solid #586779;
+  border-left: 2px solid var(--accent);
+  background: #111923ed;
+  box-shadow: 0 8px 28px #0009;
+  color: var(--text-1);
+  font: 500 12px var(--font-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scene-hover-label small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-2);
+  font: 10px var(--font-mono);
+}

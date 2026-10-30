@@ -1,0 +1,64 @@
+# Frontend architecture (Step 0)
+
+Updated: 2026-10-30. Branch: `fe`. This is a source review; no frontend code was changed in this pass.
+
+## 2026-10-31: selected-object pop-up
+
+`OrbitalScene.tsx` now reuses the shell's selected NORAD ID for a 1.2-second camera focus and an exit transition. Clicking empty canvas space deselects in Mission Control; search sets the same selected ID, while conjunction routes display their primary object. A catalog-ID index avoids linear scans during camera follow. `SelectedModel.tsx` renders one procedural figure at the `ObjectCloud` worker-buffer position (ISS, Starlink, CubeSat, generic payload, rocket body or debris). The selected point is suppressed in `objects.vert.glsl`; hover enlarges a point and shows a name tooltip. `OrbitTrails.tsx` draws the selected orbit progressively and keeps a ring/label with the figure. `ObjectInspector.tsx` adds count-up values, available operator/country metadata, the next screened encounter and navigation. New model geometry is JSX-owned by React Three Fiber, while the orbit `BufferGeometry` is explicitly disposed. Reduced-motion preferences suppress the spring/orbit and shorten camera movement. This checkout still lacks Node/npm and `node_modules`, so build, browser validation and the required before/after FPS measurement remain outstanding; do not claim the 55 fps goal until measured on a named device.
+
+## Map and ownership
+
+| Area | Key files | Responsibility |
+| --- | --- | --- |
+| Boot and shell | `frontend/src/main.tsx`, `app/App.tsx` | Font and CSS loading, mock worker startup, Query provider, router, persistent canvas, navigation, overlays and time bar |
+| Screens | `features/mission-control/ObjectInspector.tsx`, `features/conjunction/{ConjunctionScreen,AlertScreen}.tsx`, `features/negotiator/NegotiatorScreen.tsx`, `features/cascade/CascadeScreen.tsx` | Object detail, encounter and avoidance, phone alert, streamed negotiation, breakup simulation |
+| Scene | `scene/{OrbitalScene,Earth,ObjectCloud,OrbitTrails,DebrisCascade}.tsx`, `scene/*.glsl`, `scene/scene.css` | Earth, catalog points, selection and encounter geometry, camera, cascade visualization |
+| Simulation | `sim/{clock,store,omm,frames,propagation,propagation.worker}.ts` | Shared seven-day clock, OMM validation, TEME mapping, worker SGP4 positions |
+| API | `api/{types,client,hooks,handlers,mockData,mocks}.ts`, `api/mocks/browser.ts` | Contract, fetch/SSE, React Query, MSW and deterministic fixtures |
+| Design and utilities | `styles/{tokens,global,console}.css`, `features/features.css`, `ui/Icon.tsx`, `lib/{format,random}.ts` | Dark palette, layouts, responsive behavior, SVG icons and formatting |
+| Assets and configuration | `public/textures`, `public/licenses`, `public/mockServiceWorker.js`, `package.json`, `.env.example`, Vite/TS/ESLint configs | Bundled Earth textures, fonts/licenses, build and local configuration |
+
+The application is React 18, strict TypeScript, Vite 6, React Router 7, TanStack Query 5, Zustand 5, React Three Fiber 8/Drei, Three.js, satellite.js, Comlink, MSW and Radix Dialog. `motion` is listed as a dependency but the reviewed UI uses CSS animation and `requestAnimationFrame`; there is no `motion` import in `src`.
+
+## Routing and screens
+
+`main.tsx` mounts `BrowserRouter`; `App.tsx` derives mode directly from `location.pathname`, rather than a `<Routes>` tree. `/` is Mission Control, `/conjunctions/:id` shows encounter parameters and avoidance options, `/alert/:id` shows the phone alert, `/negotiator/:id` runs operator coordination, and `/cascade` shows breakup controls and results. Feature screens and the scene are lazy imported. The canvas remains mounted as mode changes; the route panels replace each other. The shell also owns command search, Ask Sentinel, settings, shortcuts and an intro overlay. On a narrow screen the threat row opens the alert route and Mission Control offers layer/threat tabs. Unknown paths currently fall back to the mission mode because mode detection uses path prefixes.
+
+Mission Control shows class and orbit-regime filters, density shells, catalog counts and sync metadata, a threat rail, a Sentinel brief, search, time controls and a selected-object inspector. The inspector computes perigee/apogee, period, inclination and eccentricity from `omm`, and shows element epoch. Conjunction detail shows TCA, miss and RTN components, relative speed, Pc, uncertainty, range chart, maneuver cards, a replay and an optional negotiation link. The negotiator displays two operators, streaming transcript, criterion scores, agreement and human approval/override controls. The cascade screen chooses parent/event/duration/launch assumption, runs the API mutation, and shows year-scale playback, counts and a tracked-population chart. The phone alert shows countdown, encounter numbers, a recommended response, review and session-local acknowledgement.
+
+## State and selection flow
+
+`useSimStore` is the global Zustand clock: epoch at module load, 1/60/600/3600× speed, pause and a seven-day clamp. `SimClockTicker` advances it every 100 ms, caps each elapsed tick at 500 ms and skips hidden tabs. Cascade playback has separate component-local years. React Query caches catalog indefinitely (`staleTime` and `gcTime` are `Infinity`), while metadata and conjunctions are fresh for 60 seconds. `App.tsx` holds selected NORAD ID, focus nonce, layer/regime/density filters, quality, modal flags, cascade results, replay and preview state; feature screens hold their own transient controls.
+
+`ObjectPicker` in `OrbitalScene.tsx` projects catalog positions to screen coordinates about every 350 ms, rebuilds a 16-pixel spatial grid, excludes points behind Earth/outside view, and searches nearby cells on pointer movement/click. A click calls the shell's `selectObject`, opening `ObjectInspector` in place of the threat rail. Search selects through `focusObject`, which also increments the focus nonce. Selecting a point alone keeps the current camera; **Focus object** or `F` triggers `CameraDirector`. Route changes clear selection, replay and burn preview. The scene uses the selected index to add one sampled orbit, ring, label and (for a close payload) satellite model. Conjunction and negotiation modes focus their primary object at TCA; cascade mode returns to an overview. `CameraControls` handles drag and zoom, while `CameraDirector` animates an arc outside Earth and stops on manual control input.
+
+## Scene and performance model
+
+`ObjectCloud` creates one `BufferGeometry` with current/previous positions, class, regime and seed attributes and renders the entire catalog as one `points` draw call. A GLSL vertex shader interpolates worker samples and applies class/regime visibility; the fragment shader draws point cores. Objects are `PAYLOAD` (red), `DEBRIS` (orange), `ROCKET_BODY`/`UNKNOWN` (pale). There is no detailed geometry per catalog item. The worker initializes OMM records through `satellite.js` `json2satrec`, propagates all records with SGP4 and transfers a fresh `Float32Array` through Comlink. `ObjectCloud` schedules the next update 200 ms after the previous one completes, then swaps geometry attributes and blends positions in render frames. Scene coordinates are `(TEME x, z, -y) / 6378.137` and Earth rotates by sidereal time.
+
+Earth uses local day/night/cloud/water textures, custom surface and atmosphere shaders, approximate solar lighting and optional clouds. The background has 12,000 stars on high quality or 4,000 on low. Low quality also sets device pixel ratio to 1 and uses fewer Earth segments; high quality caps it at 1.75. The scene uses ACES tone mapping and a CSS vignette. No `EffectComposer`/bloom postprocessing pipeline is present. `OrbitTrails` adds sampled selected-object orbits and illustrative encounter geometry; the encounter path is magnified for clarity. `DebrisCascade` caps primary fragment points at 18,000 and each secondary cloud at 2,000, spreading them in GLSL with seeded phase/kick/node attributes. Cascade motion is illustrative, not a validated long-term collision forecast.
+
+The target is about 60 fps with the full catalog on a normal laptop. The repo README and `DECISIONS.md` explicitly say GPU FPS, first meaningful frame and transfer-size budgets have **not** been measured. Dev builds offer Shift+D diagnostics with FPS and draw-call readouts. Known profiling targets are worker propagation cadence, full-catalog projection/grid rebuilding in `ObjectPicker`, attribute reallocation every propagation update, and chart/scene performance during a cascade. Geometry created in `ObjectCloud`, starfield and cascade components has explicit cleanup; React Three Fiber owns JSX geometry/material lifecycle for selected detail. Worker and pointer listeners have effect cleanup. Repeated selection/deselection still needs browser memory profiling.
+
+## API, mock and live modes
+
+`api/types.ts` is the API contract; frontend changes must not silently rename/remove its fields. `api/client.ts` builds requests from `VITE_API_BASE_URL` (blank means same origin). `VITE_USE_MOCKS` defaults to mock unless exactly `false`; `main.tsx` starts the committed MSW service worker before React in mock mode. The browser does not fetch CelesTrak. The full contract is:
+
+| Method/path | Input | Result |
+| --- | --- | --- |
+| `GET /api/catalog` | none | JSON `CatalogObject[]`: numeric `noradId`, `name`, `type`, `active`, `maneuverable`, raw `omm` |
+| `GET /api/catalog/meta` | none | JSON `CatalogMeta`: `objectCount`, `byType`, `syncedAt`, `source` |
+| `GET /api/conjunctions?days=7&minPc=1e-6` | fixed query | JSON `Conjunction[]` |
+| `GET /api/conjunctions/:id` | event ID | JSON `ConjunctionDetail`, including `rangeSeries`, covariance, options and brief |
+| `POST /api/negotiations` | `{conjunctionId}` | JSON `{negotiationId}` |
+| `GET /api/negotiations/:id/stream` | negotiation ID | SSE `NegotiationEvent` union (`message`, `scores`, `agreement`, `error`) |
+| `POST /api/cascade` | `CascadeRequest` | JSON `CascadeResult` |
+| `POST /api/ask` | `{question}` | SSE answer tokens |
+
+`api/handlers.ts` serves all endpoints via MSW; `mockData.ts` generates 33,482 deterministic synthetic OMM records and authored conjunctions, burns, negotiations and cascade outcomes. The mock ISS/COSMOS event is 412 m with Pc `3.1e-4`; the Starlink/OneWeb fixture supports two maneuverable operators. Mock values are demonstration data despite real SGP4 propagation. `client.ts` has a chunk-safe SSE parser, error mapping and abort support. Real mode uses the same paths and shapes with no browser-side authentication. There is no dispatch API: mock negotiation dispatch is labeled sample-only, live mode reports it unavailable. Backend agents own catalog freshness, screening, Pc, burns, AI and cascade computation; requests for any new API field belong in `docs/CONTRACT_REQUESTS.md` pending lead approval.
+
+## Design, accessibility and known issues
+
+`tokens.css` defines the void/base/surface dark palette, text, lines, cyan accent, class/risk colors and Archivo/IBM Plex font families. `console.css` overrides several base tokens for the graphite console treatment. Layout and responsiveness live in `global.css`, screen styling in `features.css`, scene overlays in `scene.css`; icons are authored SVGs in `ui/Icon.tsx`. Focus-visible rules, skip link, Radix dialogs, labeled charts, live transcript and reduced-motion CSS exist. Intro is skipped under reduced motion; camera transition duration drops to 100 ms and point flicker/selection rotation are suppressed. Escape returns from feature modes to overview and clears selection. Need browser-level keyboard, focus-return, contrast, phone and reduced-motion checks before treating these as fully verified.
+
+Source-level issues to revisit when relevant: route parsing has hardcoded sample fallback IDs (`iss-cosmos`, `starlink-oneweb`) even in live mode; malformed/unknown paths show Mission Control; selection and primary lookup use linear catalog scans; browser quality defaults from hardware concurrency rather than GPU capability; FPS is unmeasured. The full catalog is held in Query cache and passed into a worker, so live 30k-object memory and startup latency need production profiling. Current local checkout has no `frontend/node_modules`; this documentation pass did not run the dev server, TypeScript, lint, build or browser FPS measurement. Recheck these when implementing the next frontend change.

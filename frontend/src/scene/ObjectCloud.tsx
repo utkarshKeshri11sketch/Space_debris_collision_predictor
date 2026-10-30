@@ -29,9 +29,10 @@ export function initialPositions(catalog: CatalogObject[]) {
   return positions;
 }
 
-export default function ObjectCloud({ catalog, layers, regime, buffers, onWorkerError }: {
+export default function ObjectCloud({ catalog, layers, regime, buffers, onWorkerError, selectedIndex = -1, hoveredIndex = -1 }: {
   catalog: CatalogObject[]; layers: LayerVisibility; regime: OrbitRegime;
   buffers: React.MutableRefObject<PositionBuffers>; onWorkerError: (message: string) => void;
+  selectedIndex?: number; hoveredIndex?: number;
 }) {
   const { gl } = useThree();
   const material = useRef<ShaderMaterial>(null);
@@ -55,7 +56,7 @@ export default function ObjectCloud({ catalog, layers, regime, buffers, onWorker
     buffers.current = { current: initial, previous: initial, updatedAt: performance.now() };
     return result;
   }, [catalog, buffers]);
-  const uniforms = useMemo(() => ({ uBlend: { value: 1 }, uPixelRatio: { value: Math.min(gl.getPixelRatio(), 1.75) }, uTime: { value: 0 }, uMotion: { value: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1 }, uLayers: { value: new Vector3(1, 1, 1) }, uRegime: { value: 0 } }), [gl]);
+  const uniforms = useMemo(() => ({ uBlend: { value: 1 }, uPixelRatio: { value: Math.min(gl.getPixelRatio(), 1.75) }, uTime: { value: 0 }, uMotion: { value: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1 }, uLayers: { value: new Vector3(1, 1, 1) }, uRegime: { value: 0 }, uSelectedIndex: { value: -1 }, uHoveredIndex: { value: -1 } }), [gl]);
   useEffect(() => {
     const client = createPropagationClient();
     let disposed = false;
@@ -86,6 +87,8 @@ export default function ObjectCloud({ catalog, layers, regime, buffers, onWorker
     uniforms.uTime.value = clock.elapsedTime;
     uniforms.uLayers.value.set(Number(layers.payload), Number(layers.debris), Number(layers.rocket));
     uniforms.uRegime.value = regimeCode[regime];
+    uniforms.uSelectedIndex.value = selectedIndex;
+    uniforms.uHoveredIndex.value = hoveredIndex;
   });
   return <points geometry={geometry} frustumCulled={false} raycast={() => null}>
     <shaderMaterial ref={material} vertexShader={vertex} fragmentShader={fragment} uniforms={uniforms} transparent depthWrite={false} blending={NormalBlending} />

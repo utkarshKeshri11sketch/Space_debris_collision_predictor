@@ -1,16 +1,37 @@
-import type { CSSProperties } from 'react';
-import type { CatalogObject } from '../../api/types';
+import { useEffect, useState, type CSSProperties } from 'react';
+import type { CatalogObject, Conjunction } from '../../api/types';
 import { isMockMode } from '../../api/client';
 import { Icon } from '../../ui/Icon';
 
+function CountUp({ value, digits = 0 }: { value: number; digits?: number }) {
+  const [shown, setShown] = useState(() => matchMedia('(prefers-reduced-motion: reduce)').matches ? value : 0);
+  useEffect(() => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { setShown(value); return; }
+    const start = performance.now();
+    let frame = 0;
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / 650);
+      setShown(value * (1 - (1 - t) ** 3));
+      if (t < 1) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [value]);
+  return <>{shown.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}</>;
+}
+
 export default function ObjectInspector({
   object,
+  nextApproach,
   onClose,
   onFocus,
+  onViewConjunctions,
 }: {
   object: CatalogObject;
+  nextApproach?: Conjunction;
   onClose: () => void;
   onFocus: () => void;
+  onViewConjunctions: (id: string) => void;
 }) {
   const motion = Number(object.omm.MEAN_MOTION);
   const semiMajor = Math.cbrt(398600.4418 / ((motion * 2 * Math.PI) / 86400) ** 2);
@@ -36,6 +57,7 @@ export default function ObjectInspector({
   const epochDate = Date.parse(epoch.endsWith('Z') ? epoch : `${epoch}Z`);
   const perigee = semiMajor * (1 - eccentricity) - 6378.137;
   const apogee = semiMajor * (1 + eccentricity) - 6378.137;
+  const operator = String(object.omm.OWNER ?? object.omm.OPERATOR ?? object.omm.COUNTRY_CODE ?? object.omm.COUNTRY ?? 'Not published');
   return (
     <aside
       className="object-inspector"
@@ -65,7 +87,7 @@ export default function ObjectInspector({
         <div className="inspector-altitude">
           <span>Mean orbital altitude</span>
           <strong>
-            {altitude.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+            <CountUp key={object.noradId} value={altitude} />
             <small>km</small>
           </strong>
           <div className="altitude-range">
@@ -83,7 +105,7 @@ export default function ObjectInspector({
               Orbital speed <small>≈</small>
             </span>
             <strong>
-              {Math.sqrt(398600.4418 / semiMajor).toFixed(2)}
+              <CountUp key={object.noradId} value={Math.sqrt(398600.4418 / semiMajor)} digits={2} />
               <small>km/s</small>
             </strong>
           </div>
@@ -97,7 +119,7 @@ export default function ObjectInspector({
           <div>
             <span>Inclination</span>
             <strong>
-              {inclination.toFixed(2)}
+              <CountUp key={object.noradId} value={inclination} digits={2} />
               <small>°</small>
             </strong>
           </div>
@@ -158,6 +180,8 @@ export default function ObjectInspector({
           </svg>
         </div>
         <dl className="inspector-record">
+          <div><dt>Operator / country</dt><dd>{operator}</dd></div>
+          <div><dt>Next close approach</dt><dd>{nextApproach ? <><time dateTime={nextApproach.tca}>{new Date(nextApproach.tca).toLocaleString('en-US', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })} UTC</time><small>{nextApproach.missDistanceM.toLocaleString('en-US')} m miss</small></> : 'None in screening window'}</dd></div>
           <div>
             <dt>Orbit regime</dt>
             <dd>
@@ -187,6 +211,11 @@ export default function ObjectInspector({
         <button className="inspector-focus" onClick={onFocus}>
           <Icon name="target" size={16} />
           Focus on object<span>F</span>
+          <Icon name="arrow" size={16} />
+        </button>
+        <button className="inspector-conjunction" onClick={() => nextApproach && onViewConjunctions(nextApproach.id)} disabled={!nextApproach}>
+          <Icon name="alert" size={16} />
+          {nextApproach ? 'View conjunctions' : 'No screened conjunctions'}
           <Icon name="arrow" size={16} />
         </button>
         <p className="inspector-provenance">

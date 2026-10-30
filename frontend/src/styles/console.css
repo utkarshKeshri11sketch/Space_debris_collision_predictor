@@ -705,8 +705,15 @@ body {
   border: 1px solid #414b5b;
   border-radius: 4px;
   overflow: hidden;
-  animation: inspector-arrive 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: inspector-arrive 0.48s cubic-bezier(0.18, 0.78, 0.2, 1);
 }
+.inspector-identity, .inspector-altitude, .inspector-metrics, .inspector-orbit, .inspector-record, .inspector-focus, .inspector-conjunction { animation: inspector-row 0.46s both; }
+.inspector-altitude { animation-delay: 0.07s; }
+.inspector-metrics { animation-delay: 0.13s; }
+.inspector-orbit { animation-delay: 0.19s; }
+.inspector-record { animation-delay: 0.25s; }
+.inspector-focus, .inspector-conjunction { animation-delay: 0.3s; }
+@keyframes inspector-row { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .inspector-header {
   min-height: 52px;
   display: flex;
@@ -948,6 +955,23 @@ body {
   color: #8e9fb6;
   margin: 15px 21px 20px;
 }
+.inspector-conjunction {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: calc(100% - 42px);
+  min-height: 42px;
+  margin: 10px 21px 0;
+  padding: 0 12px;
+  border: 1px solid #5b4950;
+  border-radius: 2px;
+  background: #30232b;
+  color: #f4dadd;
+  font: 500 12px var(--font-body);
+}
+.inspector-conjunction svg:last-child { margin-left: auto; }
+.inspector-conjunction:hover:not(:disabled) { background: #45303b; border-color: var(--sat); }
+.inspector-conjunction:disabled { opacity: 0.55; cursor: default; }
 .inspector-provenance span {
   font: 9px var(--font-mono);
   display: block;

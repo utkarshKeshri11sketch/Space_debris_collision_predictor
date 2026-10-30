@@ -8,6 +8,8 @@ uniform float uTime;
 uniform float uMotion;
 uniform vec3 uLayers;
 uniform float uRegime;
+uniform float uSelectedIndex;
+uniform float uHoveredIndex;
 varying vec3 vColor;
 varying float vAlpha;
 void main() {
@@ -20,6 +22,7 @@ void main() {
   float flicker = debris ? (0.75 + sin(uTime * 0.8 * uMotion + aSeed * 0.78) * 0.16) : 1.0;
   // Selection adds a ring; the complete enabled catalog keeps the same visibility.
   vAlpha = visibleLayer * flicker * 0.88;
-  gl_PointSize = (debris ? 2.1 : (aType > 1.5 ? 2.6 : 2.4)) * uPixelRatio;
+  if (abs(aSeed - uSelectedIndex) < 0.5) vAlpha = 0.0;
+  gl_PointSize = (debris ? 2.1 : (aType > 1.5 ? 2.6 : 2.4)) * uPixelRatio * (abs(aSeed - uHoveredIndex) < 0.5 ? 2.1 : 1.0);
   gl_Position = projectionMatrix * mv;
 }

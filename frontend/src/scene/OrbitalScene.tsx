@@ -26,7 +26,7 @@ export interface OrbitalSceneProps {
   density: boolean;
   quality: 'high' | 'low';
   focusNonce: number;
-  onSelect: (id: number) => void;
+  onSelect: (id: number | null) => void;
   replayProgress?: number;
   previewBurn?: boolean;
   introActive?: boolean;
@@ -85,7 +85,7 @@ function RegimeRing() {
   return <Line points={points} color="#52677e" lineWidth={0.65} transparent opacity={0.19} dashed dashSize={0.025} gapSize={0.045} />;
 }
 
-function CameraDirector({ props, catalog, buffers, controls }: { props: OrbitalSceneProps; catalog: CatalogObject[]; buffers: React.MutableRefObject<PositionBuffers>; controls: React.RefObject<CameraControlsImpl> }) {
+function CameraDirector({ props, catalog, idToIndex, buffers, controls }: { props: OrbitalSceneProps; catalog: CatalogObject[]; idToIndex: Map<number, number>; buffers: React.MutableRefObject<PositionBuffers>; controls: React.RefObject<CameraControlsImpl> }) {
   const { camera, size } = useThree();
   const conjunctionId = props.conjunction?.id;
   const conjunctionPrimaryId = props.conjunction?.primary.noradId;
@@ -93,12 +93,14 @@ function CameraDirector({ props, catalog, buffers, controls }: { props: OrbitalS
   const selectedIdRef = useRef(props.selectedId);
   selectedIdRef.current = props.selectedId;
   const lastFocusNonce = useRef(0);
+  const userDragged = useRef(false);
+  const followed = useRef({ id: null as number | null, position: new Vector3(), camera: new Vector3(), target: new Vector3() });
   const tween = useRef({ startTime: 0, duration: 2400, active: false, start: new Vector3(), end: new Vector3(), startTarget: new Vector3(), endTarget: new Vector3(), rotation: new Quaternion(), identity: new Quaternion(), direction: new Vector3(), position: new Vector3(), target: new Vector3() });
   const introDeadline = useRef(performance.now() + 6000);
   useEffect(() => {
     const controller = controls.current;
     if (!controller) return;
-    const interrupt = () => { tween.current.active = false; };
+    const interrupt = () => { tween.current.active = false; userDragged.current = true; };
     controller.addEventListener('controlstart', interrupt);
     return () => controller.removeEventListener('controlstart', interrupt);
   }, [controls]);
@@ -108,22 +110,24 @@ function CameraDirector({ props, catalog, buffers, controls }: { props: OrbitalS
     const selectedId = selectedIdRef.current;
     const focusRequested = lastFocusNonce.current !== props.focusNonce;
     lastFocusNonce.current = props.focusNonce;
+    userDragged.current = false;
+    followed.current.id = null;
     const sun = solarDirection(useSimStore.getState().timeMs);
     const overview = sun.applyAxisAngle(new Vector3(0, 1, 0), 0.8).add(new Vector3(0, 0.22, 0)).normalize();
     let end = overview.clone().multiplyScalar(size.width < 768 ? 4.55 : 4.15);
     const target = new Vector3(0, 0, 0);
     const focusId = props.mode !== 'mission' && conjunctionPrimaryId ? conjunctionPrimaryId : selectedId;
-    const index = catalog.findIndex(object => object.noradId === focusId);
+    const index = idToIndex.get(focusId ?? -1) ?? -1;
     if ((props.mode === 'conjunction' || props.mode === 'negotiator') && index >= 0 && buffers.current.current.length > index * 3 + 2) {
       const coordinates = buffers.current.current;
       const selected = conjunctionTca ? objectPositionAt(catalog[index], new Date(conjunctionTca).getTime()) ?? new Vector3(coordinates[index * 3], coordinates[index * 3 + 1], coordinates[index * 3 + 2]) : new Vector3(coordinates[index * 3], coordinates[index * 3 + 1], coordinates[index * 3 + 2]);
       end = selected.clone().normalize().addScaledVector(overview, 0.5).normalize().multiplyScalar(props.mode === 'negotiator' ? 4.7 : 3.2);
       target.copy(selected).multiplyScalar(0.50);
-    } else if (props.mode === 'mission' && focusRequested && selectedId && index >= 0) {
+    } else if (props.mode === 'mission' && selectedId && index >= 0) {
       const positions = buffers.current.current;
       const selected = new Vector3(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
-      end = selected.clone().normalize().multiplyScalar(Math.max(2.9, selected.length() + 1.5));
-      target.copy(selected).multiplyScalar(0.65);
+      end = selected.clone().normalize().multiplyScalar(Math.max(2.15, selected.length() + 0.95)).addScaledVector(overview, 0.35);
+      target.copy(selected).multiplyScalar(0.82);
     }
     if (props.mode === 'cascade') end.copy(overview).multiplyScalar(4.1);
     if (props.introActive && animation.startTime === 0) controls.current.setLookAt(overview.x * 11, overview.y * 11, overview.z * 11, 0, 0, 0, false);
@@ -132,13 +136,39 @@ function CameraDirector({ props, catalog, buffers, controls }: { props: OrbitalS
     animation.end.copy(end); animation.endTarget.copy(target);
     animation.rotation.setFromUnitVectors(animation.start.clone().normalize(), animation.end.clone().normalize());
     animation.startTime = performance.now();
-    animation.duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 100 : props.introActive ? Math.max(100, introDeadline.current - performance.now()) : 2400;
+    animation.duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 100 : props.introActive ? Math.max(100, introDeadline.current - performance.now()) : props.mode === 'mission' && selectedId ? 1200 : focusRequested ? 950 : 850;
     animation.active = true;
     return () => { animation.active = false; };
-  }, [props.mode, props.focusNonce, conjunctionId, conjunctionPrimaryId, conjunctionTca, props.introActive, catalog, buffers, controls, size.width]);
+  }, [props.mode, props.selectedId, props.focusNonce, conjunctionId, conjunctionPrimaryId, conjunctionTca, props.introActive, catalog, idToIndex, buffers, controls, size.width]);
   useFrame(() => {
     const animation = tween.current;
-    if (!animation.active || !controls.current) return;
+    if (!controls.current) return;
+    if (!animation.active) {
+      if (props.mode === 'mission' && props.selectedId) {
+        const index = idToIndex.get(props.selectedId) ?? -1;
+        const coordinates = buffers.current.current;
+        if (index >= 0 && coordinates.length > index * 3 + 2) {
+          const follow = followed.current;
+          const x = coordinates[index * 3], y = coordinates[index * 3 + 1], z = coordinates[index * 3 + 2];
+          if (follow.id === props.selectedId) {
+            const dx = (x - follow.position.x) * 0.82, dy = (y - follow.position.y) * 0.82, dz = (z - follow.position.z) * 0.82;
+            if (dx || dy || dz) {
+              controls.current.getPosition(follow.camera);
+              controls.current.getTarget(follow.target);
+              controls.current.setLookAt(follow.camera.x + dx, follow.camera.y + dy, follow.camera.z + dz, follow.target.x + dx, follow.target.y + dy, follow.target.z + dz, false);
+            }
+          }
+          follow.position.set(x, y, z);
+          follow.id = props.selectedId;
+        }
+      }
+      if (props.mode === 'mission' && props.selectedId && !userDragged.current && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const phase = performance.now() * 0.00018;
+        const offset = Math.sin(phase) * 0.00045;
+        controls.current.rotate(offset, 0, false);
+      }
+      return;
+    }
     const raw = Math.min((performance.now() - animation.startTime) / animation.duration, 1);
     const progress = raw * raw * raw * (raw * (raw * 6 - 15) + 10);
     // Rotate the viewing direction on a sphere instead of interpolating a chord through Earth.
@@ -154,7 +184,7 @@ function CameraDirector({ props, catalog, buffers, controls }: { props: OrbitalS
   return null;
 }
 
-function ObjectPicker({ catalog, buffers, layers, regime, onSelect }: { catalog: CatalogObject[]; buffers: React.MutableRefObject<PositionBuffers>; layers: LayerVisibility; regime: OrbitRegime; onSelect: (id: number) => void }) {
+function ObjectPicker({ catalog, buffers, layers, regime, onSelect, onHover }: { catalog: CatalogObject[]; buffers: React.MutableRefObject<PositionBuffers>; layers: LayerVisibility; regime: OrbitRegime; onSelect: (id: number | null) => void; onHover: (index: number, x: number, y: number) => void }) {
   const { gl, camera, size } = useThree();
   const grid = useRef(new Map<number, number[]>());
   const screen = useMemo(() => new Float32Array(catalog.length * 2), [catalog]);
@@ -204,43 +234,54 @@ function ObjectPicker({ catalog, buffers, layers, regime, onSelect }: { catalog:
         lastHovered.current = closest;
         canvas.style.cursor = closest >= 0 ? 'pointer' : 'grab';
       }
+      onHover(closest, pointer.current.x, pointer.current.y);
     };
     const move = (event: PointerEvent) => { const bounds = canvas.getBoundingClientRect(); pointer.current.x = event.clientX - bounds.left; pointer.current.y = event.clientY - bounds.top; if (!frame) frame = requestAnimationFrame(locate); };
-    const leave = () => { lastHovered.current = -1; canvas.style.cursor = 'grab'; };
+    const leave = () => { lastHovered.current = -1; canvas.style.cursor = 'grab'; onHover(-1, 0, 0); };
     const down = (event: PointerEvent) => { pointerDown = { x: event.clientX, y: event.clientY }; };
     const click = (event: MouseEvent) => {
       const bounds = canvas.getBoundingClientRect();
       pointer.current.x = event.clientX - bounds.left; pointer.current.y = event.clientY - bounds.top;
       locate();
-      if (lastHovered.current >= 0 && Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) < 5) onSelect(catalog[lastHovered.current].noradId);
+      if (Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) < 5) onSelect(lastHovered.current >= 0 ? catalog[lastHovered.current].noradId : null);
     };
     canvas.addEventListener('pointermove', move); canvas.addEventListener('pointerleave', leave); canvas.addEventListener('pointerdown', down); canvas.addEventListener('click', click);
     return () => { cancelAnimationFrame(frame); canvas.removeEventListener('pointermove', move); canvas.removeEventListener('pointerleave', leave); canvas.removeEventListener('pointerdown', down); canvas.removeEventListener('click', click); };
-  }, [gl, catalog, columns, screen, buffers, onSelect]);
+  }, [gl, catalog, columns, screen, buffers, onSelect, onHover]);
   return null;
 }
 
-function SceneContents({ props, onWorkerError, debug }: { props: OrbitalSceneProps; onWorkerError: (value: string) => void; debug: boolean }) {
+function SceneContents({ props, onWorkerError, onHover, hoveredId, debug }: { props: OrbitalSceneProps; onWorkerError: (value: string) => void; onHover: (index: number, x: number, y: number) => void; hoveredId: number | null; debug: boolean }) {
   const catalogQuery = useCatalog();
   const catalog = catalogQuery.data ?? EMPTY_CATALOG;
+  const idToIndex = useMemo(() => new Map(catalog.map((object, index) => [object.noradId, index])), [catalog]);
   const controls = useRef<CameraControlsImpl>(null);
   const buffers = useRef<PositionBuffers>({ current: new Float32Array(), previous: new Float32Array(), updatedAt: 0 });
-  const selectedIndex = catalog.findIndex(object => object.noradId === props.selectedId);
-  const primary = catalog.find(object => object.noradId === props.conjunction?.primary.noradId);
+  const currentId = props.selectedId ?? (props.mode === 'conjunction' || props.mode === 'negotiator' ? props.conjunction?.primary.noradId ?? null : null);
+  const [displayId, setDisplayId] = useState<number | null>(currentId);
+  useEffect(() => {
+    if (currentId !== null) { setDisplayId(currentId); return; }
+    const timer = window.setTimeout(() => setDisplayId(null), 450);
+    return () => window.clearTimeout(timer);
+  }, [currentId]);
+  const selectedIndex = idToIndex.get(displayId ?? -1) ?? -1;
+  const hoveredIndex = idToIndex.get(hoveredId ?? -1) ?? -1;
+  const primaryIndex = idToIndex.get(props.conjunction?.primary.noradId ?? -1) ?? -1;
+  const primary = primaryIndex >= 0 ? catalog[primaryIndex] : undefined;
   return <>
     <color attach="background" args={['#05070d']} />
     <SolarLighting />
     <Starfield quality={props.quality} />
     <SceneBoundary fallback={<EarthFallback />}><Earth quality={props.quality} /></SceneBoundary>
     <RegimeRing />
-    {catalog.length > 0 && <ObjectCloud catalog={catalog} layers={props.layers} regime={props.regime} buffers={buffers} onWorkerError={onWorkerError} />}
+    {catalog.length > 0 && <ObjectCloud catalog={catalog} layers={props.layers} regime={props.regime} buffers={buffers} selectedIndex={currentId === null ? -1 : selectedIndex} hoveredIndex={hoveredIndex} onWorkerError={onWorkerError} />}
     {props.density && <DensityShells />}
-    {selectedIndex >= 0 && <SelectedObject object={catalog[selectedIndex]} index={selectedIndex} buffers={buffers} closeUp={props.mode !== 'mission'} />}
+    {selectedIndex >= 0 && <SelectedObject key={displayId} object={catalog[selectedIndex]} index={selectedIndex} buffers={buffers} exiting={currentId === null} />}
     {props.conjunction && primary && props.mode !== 'mission' && <Encounter conjunction={props.conjunction} primary={primary} replayProgress={props.replayProgress} previewBurn={props.previewBurn} />}
     {props.cascade && props.mode === 'cascade' && <DebrisCascade result={props.cascade} year={props.cascadeYear} />}
     <CameraControls ref={controls} minDistance={1.7} maxDistance={14} smoothTime={0.3} draggingSmoothTime={0.12} dollySpeed={0.6} />
-    <CameraDirector props={props} catalog={catalog} buffers={buffers} controls={controls} />
-    <ObjectPicker catalog={catalog} buffers={buffers} layers={props.layers} regime={props.regime} onSelect={props.onSelect} />
+    <CameraDirector props={props} catalog={catalog} idToIndex={idToIndex} buffers={buffers} controls={controls} />
+    <ObjectPicker catalog={catalog} buffers={buffers} layers={props.layers} regime={props.regime} onSelect={props.onSelect} onHover={onHover} />
     {debug && <><Stats className="scene-stats" /><DrawCallReadout /></>}
   </>;
 }
@@ -249,6 +290,9 @@ export default function OrbitalScene(props: OrbitalSceneProps) {
   const [workerError, setWorkerError] = useState('');
   const [debug, setDebug] = useState(false);
   const [visible, setVisible] = useState(!document.hidden);
+  const [hover, setHover] = useState<{ index: number; x: number; y: number }>({ index: -1, x: 0, y: 0 });
+  const catalog = useCatalog().data;
+  const onHover = useCallback((index: number, x: number, y: number) => setHover(previous => previous.index === index && Math.abs(previous.x - x) < 20 && Math.abs(previous.y - y) < 20 ? previous : { index, x, y }), []);
   const reportError = useCallback((message: string) => setWorkerError(message), []);
   const rendererSettings = useMemo(() => ({ antialias: true, alpha: false, powerPreference: props.quality === 'high' ? 'high-performance' as const : 'low-power' as const }), [props.quality]);
   useEffect(() => {
@@ -260,10 +304,11 @@ export default function OrbitalScene(props: OrbitalSceneProps) {
   return <div className="orbital-scene" aria-label="Interactive Earth and orbital catalog. Use object search for a text alternative.">
     <SceneBoundary>
       <Canvas camera={CAMERA_SETTINGS} dpr={props.quality === 'high' ? [1, 1.75] : 1} frameloop={visible ? 'always' : 'never'} gl={rendererSettings} onCreated={({ gl }) => { gl.toneMapping = ACESFilmicToneMapping; gl.toneMappingExposure = 1.18; gl.outputColorSpace = SRGBColorSpace; gl.domElement.setAttribute('role', 'img'); gl.domElement.setAttribute('aria-label', 'Earth orbit visualization. Drag to rotate, scroll to zoom. Click a catalog dot for object information.'); }}>
-        <Suspense fallback={null}><SceneContents props={props} onWorkerError={reportError} debug={debug} /></Suspense>
+        <Suspense fallback={null}><SceneContents props={props} onWorkerError={reportError} onHover={onHover} hoveredId={catalog?.[hover.index]?.noradId ?? null} debug={debug} /></Suspense>
       </Canvas>
     </SceneBoundary>
     <div className="scene-vignette" />
+    {hover.index >= 0 && catalog?.[hover.index] && hover.x > 0 && <div className="scene-hover-label" style={{ left: hover.x + 16, top: hover.y - 12 }} role="status">{catalog[hover.index].name}<small>NORAD {catalog[hover.index].noradId}</small></div>}
     {workerError && <div className="scene-worker-notice" role="status">Propagation paused · showing last available positions</div>}
   </div>;
 }
