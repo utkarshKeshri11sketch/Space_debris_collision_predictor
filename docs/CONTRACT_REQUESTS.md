@@ -15,13 +15,15 @@ case that gave the same Δv within 0.01 m/s.
 Code lives at the repo root, `app/physics/` and `tests/physics/`, like `app/ai/` on `be-ai`.
 
 - `GET /api/conjunctions/:id`, with `enc` = the screening `Encounter` for that id:
-  `plan = plan_for_detail(enc.as_conjunction() | {...}, now=now, encounter=encounter_from_screening(enc))`.
-  Simpler: `detail = run.get_detail(id)` and then
-  `detail.update(plan_for_detail(detail, now=now, encounter=encounter_from_screening(enc)).to_contract())`.
-  This sets `options` and, when a burn is recommended, `afterSeries`. You can also pass the options
-  straight to `run.get_detail(id, options=plan.options)` and set `afterSeries` afterwards.
-- Negotiator candidates (answers the AI request below):
-  `{str(o["noradId"]): next(x for x in options_for(detail, o["noradId"], now=now) if x["direction"] != "none") for o in (primary, secondary)}`.
+  ```python
+  detail = run.get_detail(id)
+  detail.update(plan_for_detail(detail, now=now, encounter=encounter_from_screening(enc)).to_contract())
+  ```
+  This sets `options` and, when a burn is recommended, `afterSeries`. With no screening `Encounter`
+  at hand, leave out `encounter=`; it falls back to rebuilding geometry from the detail.
+- Negotiator candidates, as the AI agent requested (PHYS-6): for each side,
+  `next(x for x in options_for(detail, ref["noradId"], now=now, encounter=...) if x["direction"] != "none")`,
+  keyed by `str(ref["noradId"])`.
 - `POST /api/cascade`: `simulate(request, catalog, environment=env).result` returns `CascadeResult`.
   `LookupError` → 404, `ValueError` → 400. Cache `env = build_environment(catalog)` per catalog sync
   (about 1.2 s). `.diagnostics` (J2 nodal spread per year, ring-closure year) is extra context for
