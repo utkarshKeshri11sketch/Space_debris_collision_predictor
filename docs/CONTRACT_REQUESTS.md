@@ -24,12 +24,12 @@ each option's `newPc` use the same formula.
   `detail["options"], detail["afterSeries"] = plan.options, plan.after_series` (via `plan.to_contract()`).
 - `POST /api/cascade`: validate `CascadeRequest` and look up the parent (404 if missing), then call
   `simulate_cascade(parent, catalog, event=…, years=…, include_launches=…)`. It returns a dict shaped
-  exactly like `CascadeResult`. Cache `baseline_survival(catalog)` per catalog sync.
+  exactly like `CascadeResult`. Cache `build_environment(catalog)` per catalog sync and pass it as `environment=`.
 - Both functions accept catalog objects as dicts or as Pydantic models with the contract field names.
 
 ## PHYS-3 · Physics → Lead (frontend owner): cascade visual scale (FYI)
 
-NSBM fragment Δv for collisions has a standard deviation of about 100–200 m/s, against 38 m/s in the
+NSBM fragment Δv for an SL-16 collision gives `spreadDvMs` ≈ {357, 583} m/s, against {85, 38} in the
 mock. `cascade.vert.glsl` scales kicks by `sd/100`, so the real cloud will look much wider. If it looks
 wrong in the demo, the shader scale should be clamped. The API values stay physical.
 

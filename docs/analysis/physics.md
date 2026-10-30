@@ -218,12 +218,14 @@ TEME from SGP4 is fine), the combined covariance in contract form (`sigmaMajorM`
    growth with element age). We need one shared definition so Pc in the list and `newPc` in the options
    agree. I propose Screening calls my `collision_probability()`.
 3. **Cascade numbers:** NSBM numbers differ from the mock. An SL-16 collision gives ≈ 4 700 fragments
-   (mock 12 784). An explosion gives ≈ 240 (mock 4 260). Real Δv spread is ≈ 100–200 m/s (mock sd 38),
-   and the shader multiplies by `sd/100`, so the cloud will look wider. The frontend is out of scope for
+   (mock 12 784). An explosion gives ≈ 240 (mock 4 260). The orbiting-fragment Δv spread is
+   ≈ {mean 357, sd 583} m/s (mock {85, 38}). The shader multiplies by `sd/100`, so the cloud will look
+   much wider. The frontend is out of scope for
    me; flagged for the Lead.
 4. **Propellant:** real ISS propellant for 0.4 m/s is about 60 kg (mock 0.18 kg). We report real figures.
 5. **Recommendation threshold:** the default is 1e-4 (common NASA CARA/ESA practice), so
    `starlink-oneweb` (Pc 8.7e-5 in the mock) would default to "no action" while still listing burns.
    Should the operator-specific threshold come from the AI or the request?
-6. **Cascade latency:** decaying about 30 000 catalog objects plus fragments takes about 1–2 s. The
-   baseline survival is a separate cached function keyed on the catalog sync time.
+6. **Cascade latency:** `build_environment(catalog)` (catalog decay and shell densities) takes about
+   1.2 s and does not depend on the request. The Lead should cache it per catalog sync. Each cascade
+   then takes 0.1–0.6 s.
