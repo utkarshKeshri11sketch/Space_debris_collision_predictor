@@ -62,3 +62,17 @@ def test_cascade():
 
 def test_ask_validation():
     assert client.post("/api/ask", json={"question": " "}).status_code == 400
+
+
+def test_ask_answers_when_screening_is_unavailable(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.physics import screening
+
+    def stale(*_args, **_kwargs):
+        raise HTTPException(400, "element epoch outside configured age limit for requested window")
+
+    monkeypatch.setattr(screening, "screen", stale)
+    response = client.post("/api/ask", json={"question": "What is the best pizza recipe?"})
+    assert response.status_code == 200
+    assert "".join(t["text"] for t in sse(response)).startswith("I can only help with")

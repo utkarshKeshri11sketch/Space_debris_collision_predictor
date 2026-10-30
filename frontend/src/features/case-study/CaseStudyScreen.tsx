@@ -2,8 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import { useCaseStudies, useCaseStudy } from '../../api/hooks';
 import type { CaseStudy, NegotiationEvent } from '../../api/types';
-import { formatDistance, formatProbability } from '../../lib/format';
+import { formatDistance, formatProbability, formatPropellant } from '../../lib/format';
+import { knownValues } from '../../lib/grounding';
+import { PhysicsText } from '../../ui/PhysicsText';
 import './caseStudy.css';
+
+export { formatPropellant };
 
 type Message = Extract<NegotiationEvent, { type: 'message' }>;
 type Scores = Extract<NegotiationEvent, { type: 'scores' }>;
@@ -13,12 +17,6 @@ type View = 'reality' | 'sentinel';
 interface Props {
   caseId?: string;
   onSelect: (id: string) => void;
-}
-
-/** Sub-gram electric-propulsion burns read better in grams. */
-export function formatPropellant(kg: number): string {
-  if (!Number.isFinite(kg)) return '—';
-  return kg >= 0.01 ? `${kg.toFixed(2)} kg` : `${(kg * 1000).toPrecision(2)} g`;
 }
 
 /** Log-scale bar width between 0.1 g and 1 kg, so a 400x gap is still visible. */
@@ -146,7 +144,13 @@ function RealityTimeline({ data }: { data: CaseStudy }) {
   );
 }
 
-function SentinelReplay({ data }: { data: CaseStudy }) {
+function SentinelReplay({
+  data,
+  onMeasured,
+}: {
+  data: CaseStudy;
+  onMeasured: (seconds: number) => void;
+}) {
   // Messages and scores in stream order, so the score table appears where the mediator used it.
   const [events, setEvents] = useState<(Message | Scores)[]>([]);
   const [agreement, setAgreement] = useState<Agreement | null>(null);
@@ -183,6 +187,7 @@ function SentinelReplay({ data }: { data: CaseStudy }) {
           if (event.type === 'message' || event.type === 'scores')
             setEvents((items) => [...items, event]);
           if (event.type === 'agreement') {
+            onMeasured((performance.now() - started) / 1000);
             setAgreement(event);
             setStatus('complete');
           }
@@ -225,7 +230,14 @@ function SentinelReplay({ data }: { data: CaseStudy }) {
             item.type === 'message' ? (
               <li key={i} className={`cs-msg cs-msg-${item.speaker}`}>
                 <b>{name(item.speaker)}</b>
-                <p>{item.text}</p>
+                <PhysicsText
+                  text={item.text}
+                  known={
+                    data.conjunction
+                      ? knownValues(data.conjunction, agreement ? [agreement] : [])
+                      : []
+                  }
+                />
               </li>
             ) : (
               <li key={i} className="cs-scores">
@@ -349,11 +361,37 @@ function Comparison({ data }: { data: CaseStudy }) {
   );
 }
 
+/** The headline contrast, readable from the back of the room. */
+function RewindBanner({ data, seconds }: { data: CaseStudy; seconds: number | null }) {
+  const ratio = data.comparison?.propellantRatio;
+  return (
+    <div className="cs-rewind" aria-label="Headline comparison">
+      <div className="cs-rewind-side bad">
+        <span>{data.date.slice(0, 4)} · without a negotiator</span>
+        <strong>Agreement never reached</strong>
+        <small>The crewed station moved alone; China notified the UN months later.</small>
+      </div>
+      <div className="cs-rewind-side good">
+        <span>With OrbitSentinel</span>
+        <strong>
+          {seconds !== null ? `Agreement in ${seconds.toFixed(1)} s` : 'Agreement in seconds'}
+        </strong>
+        <small>
+          {ratio ? `${Math.round(ratio)}× less propellant` : 'Both sides costed'}
+          {seconds === null ? ' · replay below to measure the time' : ' · measured in this replay'}
+        </small>
+      </div>
+    </div>
+  );
+}
+
 export default function CaseStudyScreen({ caseId, onSelect }: Props) {
   const list = useCaseStudies();
   const id = caseId ?? list.data?.[0]?.id;
   const query = useCaseStudy(id);
   const [view, setView] = useState<View>('reality');
+  const [measured, setMeasured] = useState<number | null>(null);
+  useEffect(() => setMeasured(null), [id]);
   const data = query.data;
   const ready = data && data.conjunction && data.reality && data.orbitSentinel;
 
@@ -361,7 +399,7 @@ export default function CaseStudyScreen({ caseId, onSelect }: Props) {
     <div className="case-study" aria-busy={query.isPending}>
       <header className="cs-header">
         <div>
-          <span className="eyebrow">Case study · real incident replayed</span>
+          <span className="eyebrow">Rewind · a real incident replayed through OrbitSentinel</span>
           <h2>{data?.title ?? 'Loading case study…'}</h2>
         </div>
         <div className="cs-tabs" role="tablist" aria-label="Incident">
@@ -398,6 +436,7 @@ export default function CaseStudyScreen({ caseId, onSelect }: Props) {
       )}
       {ready && (
         <>
+          <RewindBanner data={data} seconds={measured} />
           <div className="cs-stage">
             <div className="cs-toggle" role="radiogroup" aria-label="Scenario">
               <button
@@ -426,7 +465,7 @@ export default function CaseStudyScreen({ caseId, onSelect }: Props) {
           </div>
           <div className="cs-columns">
             <RealityTimeline data={data} />
-            <SentinelReplay key={data.id} data={data} />
+            <SentinelReplay key={data.id} data={data} onMeasured={setMeasured} />
           </div>
           <Comparison data={data} />
           <footer className="cs-footnote">

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useCascade, useCatalog } from '../../api/hooks';
 import type { CascadeResult } from '../../api/types';
 import { formatNumber } from '../../lib/format';
@@ -80,18 +81,25 @@ function GrowthChart({ result, year }: { result: CascadeResult; year: number }) 
 export default function CascadeScreen({ onResult, onYear }: Props) {
   const catalog = useCatalog();
   const simulation = useCascade();
-  const candidates = useMemo(
-    () =>
-      catalog.data
-        ?.filter(
-          (object) =>
-            object.name === 'SL-16 R/B' ||
-            object.name === 'FENGYUN 1C DEB' ||
-            object.name === 'IRIDIUM 33 DEB',
-        )
-        .slice(0, 12) ?? [],
-    [catalog.data],
-  );
+  // "What if this one hits?" from a conjunction: /cascade?norad=<primary>&from=<conjunction id>
+  const [params] = useSearchParams();
+  const whatIfNorad = Number(params.get('norad')) || 0;
+  const whatIfFrom = params.get('from');
+  const autoRan = useRef(false);
+  const candidates = useMemo(() => {
+    const presets =
+      catalog.data?.filter(
+        (object) =>
+          object.name === 'SL-16 R/B' ||
+          object.name === 'FENGYUN 1C DEB' ||
+          object.name === 'IRIDIUM 33 DEB',
+      ) ?? [];
+    const whatIf = catalog.data?.find((object) => object.noradId === whatIfNorad);
+    return (whatIf ? [whatIf, ...presets.filter((o) => o.noradId !== whatIfNorad)] : presets).slice(
+      0,
+      12,
+    );
+  }, [catalog.data, whatIfNorad]);
   const [noradId, setNoradId] = useState<number>(0);
   const [event, setEvent] = useState<'collision' | 'explosion'>('collision');
   const [years, setYears] = useState(25);
@@ -101,11 +109,15 @@ export default function CascadeScreen({ onResult, onYear }: Props) {
   const [activeLength, setActiveLength] = useState(25);
   const [result, setResult] = useState<CascadeResult | undefined>();
   useEffect(() => {
+    if (whatIfNorad && candidates.some((object) => object.noradId === whatIfNorad)) {
+      if (!autoRan.current) setNoradId(whatIfNorad);
+      return;
+    }
     if (!noradId && candidates.length)
       setNoradId(
         candidates.find((object) => object.name === 'SL-16 R/B')?.noradId ?? candidates[0].noradId,
       );
-  }, [candidates, noradId]);
+  }, [candidates, noradId, whatIfNorad]);
   useEffect(() => {
     if (!playing || !result) return;
     let last = performance.now();
@@ -142,6 +154,13 @@ export default function CascadeScreen({ onResult, onYear }: Props) {
       },
     );
   };
+  // Run the what-if scenario once, as soon as its parent object is selected.
+  useEffect(() => {
+    if (!whatIfNorad || autoRan.current || noradId !== whatIfNorad) return;
+    autoRan.current = true;
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noradId, whatIfNorad]);
   const reset = () => {
     setPlaying(false);
     setYear(0);
@@ -168,6 +187,12 @@ export default function CascadeScreen({ onResult, onYear }: Props) {
         <p className="feature-description">
           Explore how a single event reshapes the orbital environment.
         </p>
+        {whatIfFrom && parent?.noradId === whatIfNorad && (
+          <div className="what-if-banner" role="status">
+            <b>What if it hits?</b> Simulating the collision that breaks up {parent.name}, from a
+            screened conjunction. This is the consequence a missed avoidance would leave behind.
+          </div>
+        )}
         <fieldset disabled={simulation.isPending} className="cascade-fieldset">
           <label className="feature-field">
             Parent object

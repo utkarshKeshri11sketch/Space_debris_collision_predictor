@@ -1,0 +1,133 @@
+/* Visual markers for OrbitSentinel's differentiators (physics-grounded AI, open weights, honest Pc). */
+.physics-num {
+  color: var(--text-1);
+  border-bottom: 1px dotted var(--ok);
+  white-space: nowrap;
+}
+.physics-num sup {
+  margin-left: 2px;
+  color: var(--ok);
+  font-size: 9px;
+}
+.physics-count {
+  display: block;
+  margin-top: 4px;
+  color: var(--ok);
+  font: 10px var(--font-mono);
+  letter-spacing: 0.02em;
+}
+.trust-badge {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.trust-badge span {
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  color: var(--text-2);
+  font: 10px var(--font-mono);
+}
+.trust-badge span:nth-child(2) {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.weight-explorer-toggle {
+  margin-top: 10px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: 12px var(--font-body);
+  cursor: pointer;
+  padding: 0;
+}
+.weight-explorer {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-1);
+  font-size: 12px;
+}
+.weight-explorer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  color: var(--text-1);
+}
+.weight-explorer-head button {
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.weight-explorer label {
+  display: grid;
+  grid-template-columns: 1fr 90px 26px;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+}
+.weight-explorer input {
+  accent-color: var(--accent);
+}
+.weight-explorer label b {
+  text-align: right;
+  font: 11px var(--font-mono);
+  color: var(--text-1);
+}
+.weight-explorer-result {
+  margin: 8px 0 4px;
+  color: var(--text-1);
+  font-weight: 500;
+}
+.weight-explorer-result.flipped {
+  color: var(--risk-high);
+}
+.weight-explorer small {
+  color: var(--text-3);
+  font-size: 10px;
+}
+.pc-bound {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--risk-high);
+  border-radius: 2px;
+  color: var(--risk-high);
+  font: 10px var(--font-mono);
+  vertical-align: middle;
+  cursor: help;
+}
+.what-if-button {
+  margin-top: 8px;
+  border-color: var(--risk-critical);
+}
+.what-if-button span {
+  color: var(--text-3);
+  margin-left: 4px;
+}
+.what-if-banner {
+  margin: 10px 0 4px;
+  padding: 9px 10px;
+  border-left: 2px solid var(--risk-critical);
+  background: #1a0f12;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.what-if-banner b {
+  color: var(--text-1);
+}
+.refused-chip {
+  display: inline-block;
+  margin: 6px 0;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  color: var(--accent);
+  font: 11px var(--font-mono);
+}

@@ -3,7 +3,10 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { api, isMockMode } from '../../api/client';
 import { useConjunction } from '../../api/hooks';
 import type { NegotiationEvent } from '../../api/types';
-import { formatDistance, formatProbability, formatUtc } from '../../lib/format';
+import { formatDistance, formatProbability, formatPropellant, formatUtc } from '../../lib/format';
+import { knownValues } from '../../lib/grounding';
+import { PhysicsText } from '../../ui/PhysicsText';
+import { WeightExplorer } from './WeightExplorer';
 
 type Message = Extract<NegotiationEvent, { type: 'message' }>;
 type Scores = Extract<NegotiationEvent, { type: 'scores' }>;
@@ -181,6 +184,8 @@ export default function NegotiatorScreen({ conjunctionId, onAgreement }: Props) 
       </aside>
     );
   const lastSpeaker = messages[messages.length - 1]?.speaker;
+  // Numbers the physics produced; agent text that quotes them gets a "physics ✓" tag.
+  const known = knownValues(data, agreement ? [agreement] : []);
   const scoreWeight = scores?.criteria.reduce((sum, c) => sum + c.weight, 0) || 1;
   const scoreA = scores
     ? scores.criteria.reduce((sum, c) => sum + c.a * c.weight, 0) / scoreWeight
@@ -285,6 +290,14 @@ export default function NegotiatorScreen({ conjunctionId, onAgreement }: Props) 
                   </div>
                 );
               })}
+              <WeightExplorer
+                criteria={scores.criteria}
+                chosen={
+                  agreement ? (agreement.mover.noradId === data.primary.noradId ? 'a' : 'b') : null
+                }
+                nameA={data.primary.name}
+                nameB={data.secondary.name}
+              />
             </>
           ) : (
             <div className="scoring-empty">
@@ -314,7 +327,7 @@ export default function NegotiatorScreen({ conjunctionId, onAgreement }: Props) 
               </div>
               <div>
                 <dt>Propellant cost</dt>
-                <dd>{agreement.maneuver.propellantKg.toFixed(2)} kg</dd>
+                <dd>{formatPropellant(agreement.maneuver.propellantKg)}</dd>
               </div>
             </dl>
             <small>Signed by {agreement.signedBy.join(' + ')}</small>
@@ -350,6 +363,14 @@ export default function NegotiatorScreen({ conjunctionId, onAgreement }: Props) 
           <div>
             <span className="eyebrow">Live negotiation</span>
             <h3>Negotiation transcript</h3>
+            <div
+              className="trust-badge"
+              title="Agents write the words; every number comes from the physics engine; the decision uses published weights."
+            >
+              <span>Words: AI</span>
+              <span>Numbers: physics</span>
+              <span>Decision: published weights</span>
+            </div>
           </div>
           <span className={`stream-status ${status}`}>
             <i />
@@ -394,7 +415,7 @@ export default function NegotiatorScreen({ conjunctionId, onAgreement }: Props) 
                 </span>
                 <small>ROUND {message.round}</small>
               </div>
-              <p>{message.text}</p>
+              <PhysicsText text={message.text} known={known} />
             </article>
           ))}
           {status === 'streaming' && (

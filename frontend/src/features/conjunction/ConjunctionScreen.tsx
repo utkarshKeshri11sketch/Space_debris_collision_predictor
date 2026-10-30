@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useConjunction } from '../../api/hooks';
 import { isMockMode } from '../../api/client';
 import type { ConjunctionDetail, ManeuverOption } from '../../api/types';
@@ -7,6 +8,7 @@ import {
   formatCountdown,
   formatDistance,
   formatProbability,
+  formatPropellant,
   formatUtc,
   probabilityOdds,
 } from '../../lib/format';
@@ -152,6 +154,7 @@ function EncounterPlane({ data }: { data: ConjunctionDetail }) {
 }
 
 export default function ConjunctionScreen({ id, onReplay, onPreviewBurn, onNegotiate }: Props) {
+  const navigate = useNavigate();
   const query = useConjunction(id);
   const timeMs = useSimStore((s) => s.timeMs);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -256,6 +259,15 @@ export default function ConjunctionScreen({ id, onReplay, onPreviewBurn, onNegot
             <dd>
               {formatProbability(data.pc)}
               <small>{probabilityOdds(data.pc)}</small>
+              {!isMockMode && (
+                // Backend default SCREENING_PC_MODEL=max: public orbit data has no covariance.
+                <span
+                  className="pc-bound"
+                  title="Public orbit data carries no error estimates, so this is the highest probability any error size could give (maximum-probability bound), not a guess."
+                >
+                  worst-case bound
+                </span>
+              )}
             </dd>
           </div>
           <div>
@@ -353,9 +365,7 @@ export default function ConjunctionScreen({ id, onReplay, onPreviewBurn, onNegot
                   </div>
                   <div>
                     <dt>Fuel</dt>
-                    <dd>
-                      {option.propellantKg.toFixed(2)} <small>kg</small>
-                    </dd>
+                    <dd>{formatPropellant(option.propellantKg)}</dd>
                   </div>
                 </dl>
               </button>
@@ -393,6 +403,14 @@ export default function ConjunctionScreen({ id, onReplay, onPreviewBurn, onNegot
             Start operator negotiation <span aria-hidden="true">↗</span>
           </button>
         )}
+        <button
+          className="feature-button full-width what-if-button"
+          onClick={() =>
+            navigate(`/cascade?norad=${data.primary.noradId}&from=${encodeURIComponent(data.id)}`)
+          }
+        >
+          What if this one hits? <span aria-hidden="true">→ Cascade Lab</span>
+        </button>
         <section className="feature-section feature-brief">
           <span className="eyebrow">Sentinel assessment</span>
           <p>{data.brief}</p>

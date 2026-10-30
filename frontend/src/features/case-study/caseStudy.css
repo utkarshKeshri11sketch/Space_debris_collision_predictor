@@ -318,3 +318,44 @@
 .cs-row-bars > span:not(:first-child) {
   flex-wrap: wrap;
 }
+.cs-rewind {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.cs-rewind-side {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+}
+.cs-rewind-side span {
+  color: var(--text-3);
+  font: 600 10px var(--font-display);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.cs-rewind-side strong {
+  display: block;
+  margin: 6px 0 4px;
+  color: var(--text-1);
+  font: 500 24px var(--font-display);
+}
+.cs-rewind-side small {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.cs-rewind-side.bad {
+  border-left: 3px solid var(--risk-critical);
+}
+.cs-rewind-side.good {
+  border-left: 3px solid var(--ok);
+}
+.cs-rewind-side.good strong {
+  color: var(--ok);
+}
+@media (max-width: 900px) {
+  .cs-rewind {
+    grid-template-columns: 1fr;
+  }
+}

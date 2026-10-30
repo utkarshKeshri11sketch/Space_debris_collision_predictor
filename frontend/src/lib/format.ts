@@ -34,3 +34,9 @@ export function formatUtcDate(value: string | number | Date): string {
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? '—' : `${date.toISOString().slice(0, 10)} · ${formatUtc(date)}`;
 }
+/** Electric-propulsion avoidance burns on real events cost well under a gram; show those in grams. */
+export function formatPropellant(kg: number): string {
+  if (!Number.isFinite(kg)) return '—';
+  if (kg === 0) return '0 kg';
+  return kg >= 0.01 ? `${kg.toFixed(2)} kg` : `${(kg * 1000).toPrecision(2)} g`;
+}

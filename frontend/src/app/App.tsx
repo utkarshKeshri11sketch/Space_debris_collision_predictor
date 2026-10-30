@@ -9,6 +9,7 @@ import { Icon } from '../ui/Icon';
 import ObjectInspector from '../features/mission-control/ObjectInspector';
 import '../features/features.css';
 import '../styles/console.css';
+import '../styles/usp.css';
 
 const OrbitalScene = lazy(() => import('../scene/OrbitalScene'));
 const ConjunctionScreen = lazy(() => import('../features/conjunction/ConjunctionScreen'));
@@ -17,6 +18,8 @@ const CascadeScreen = lazy(() => import('../features/cascade/CascadeScreen'));
 const AlertScreen = lazy(() => import('../features/conjunction/AlertScreen'));
 const CaseStudyScreen = lazy(() => import('../features/case-study/CaseStudyScreen'));
 const speeds = [1, 60, 600, 3600];
+// Backend Ask Sentinel refusals (app/ai/ask.py OFF_TOPIC / NOT_IN_RUN).
+const REFUSAL = /^(I can only help with|That isn't in the current screening run)/;
 const utc = (ms: number) => new Date(ms).toISOString().slice(11, 19);
 const dateUtc = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const compact = (n: number) => n.toLocaleString('en-US');
@@ -57,12 +60,12 @@ export default function App() {
   const mode = location.pathname.startsWith('/case-study')
     ? 'casestudy'
     : location.pathname.startsWith('/cascade')
-    ? 'cascade'
-    : location.pathname.startsWith('/negotiator')
-      ? 'negotiator'
-      : location.pathname.startsWith('/conjunctions') || location.pathname.startsWith('/alert')
-        ? 'conjunction'
-        : 'mission';
+      ? 'cascade'
+      : location.pathname.startsWith('/negotiator')
+        ? 'negotiator'
+        : location.pathname.startsWith('/conjunctions') || location.pathname.startsWith('/alert')
+          ? 'conjunction'
+          : 'mission';
   const eventId =
     location.pathname.split('/')[2] || (mode === 'negotiator' ? 'starlink-oneweb' : 'iss-cosmos');
   const threats = useConjunctions();
@@ -146,7 +149,9 @@ export default function App() {
     (c) => c.primary.maneuverable && c.secondary.maneuverable,
   )?.id;
   return (
-    <div className={`application mode-${mode} mobile-${mobilePanel}${selectedId !== null ? ' has-selection' : ''}`}>
+    <div
+      className={`application mode-${mode} mobile-${mobilePanel}${selectedId !== null ? ' has-selection' : ''}`}
+    >
       <SimClockTicker />
       <a className="skip-link" href="#workspace">
         Skip to mission data
@@ -180,7 +185,7 @@ export default function App() {
           </NavLink>
           <NavLink to={`/negotiator/${navNegotiation ?? 'starlink-oneweb'}`}>Negotiator</NavLink>
           <NavLink to="/cascade">Cascade Lab</NavLink>
-          <NavLink to="/case-study">Case Study</NavLink>
+          <NavLink to="/case-study">Rewind 2021</NavLink>
         </nav>
         <div className="topbar-tools">
           <span className="sync">
@@ -245,25 +250,27 @@ export default function App() {
             <div className="eyebrow">
               Mission control <span className="eyebrow-separator">/</span>{' '}
               {mode === 'mission'
-                ? 'Orbital environment'
+                ? selected
+                  ? `Focus mode · ${selected.name}`
+                  : 'Orbital environment'
                 : mode === 'casestudy'
-                  ? 'PAST INCIDENT REPLAY'
+                  ? 'REAL INCIDENT · REPLAYED'
                   : mode === 'cascade'
-                  ? 'LONG-TERM EVOLUTION'
-                  : mode === 'negotiator'
-                    ? 'OPERATOR COORDINATION'
-                    : 'ENCOUNTER ANALYSIS'}
+                    ? 'LONG-TERM EVOLUTION'
+                    : mode === 'negotiator'
+                      ? 'OPERATOR COORDINATION'
+                      : 'ENCOUNTER ANALYSIS'}
             </div>
             <h1>
               {mode === 'mission'
                 ? 'Orbital overview'
                 : mode === 'casestudy'
-                  ? 'Case study'
+                  ? 'Rewind 2021'
                   : mode === 'cascade'
-                  ? 'Cascade simulation'
-                  : mode === 'negotiator'
-                    ? 'Operator coordination'
-                    : 'Conjunction analysis'}
+                    ? 'Cascade simulation'
+                    : mode === 'negotiator'
+                      ? 'Operator coordination'
+                      : 'Conjunction analysis'}
             </h1>
           </div>
           <div className="heading-right">
@@ -289,7 +296,11 @@ export default function App() {
               <ObjectInspector
                 key={selected.noradId}
                 object={selected}
-                nextApproach={threats.data?.find(event => event.primary.noradId === selected.noradId || event.secondary.noradId === selected.noradId)}
+                nextApproach={threats.data?.find(
+                  (event) =>
+                    event.primary.noradId === selected.noradId ||
+                    event.secondary.noradId === selected.noradId,
+                )}
                 onClose={() => setSelectedId(null)}
                 onFocus={() => setFocusNonce((v) => v + 1)}
                 onViewConjunctions={(id) => navigate(`/conjunctions/${id}`)}
@@ -413,8 +424,9 @@ export default function App() {
       </main>
       <footer className="statusbar">
         <span>
-          <i className="status-dot" /> {isMockMode ? 'DEMO ENVIRONMENT' : 'BACKEND CONNECTED'}{' '}
-          <b>/</b> ORBITSENTINEL v1.0
+          <i className="status-dot" />{' '}
+          {isMockMode ? 'DEMO ENVIRONMENT · RUNS OFFLINE' : 'BACKEND CONNECTED'} <b>/</b>{' '}
+          ORBITSENTINEL v1.0
         </span>
         <span>
           SGP4 · WGS-72 <b>/</b>{' '}
@@ -996,6 +1008,14 @@ function CommandPalette({
                   {answer}
                   {working && <span className="typing-cursor" />}
                 </p>
+                {!working && REFUSAL.test(answer) && (
+                  <span
+                    className="refused-chip"
+                    title="Sentinel answers only from computed screening data and does not guess."
+                  >
+                    Refused to guess · answers only from computed data
+                  </span>
+                )}
                 <small>
                   {isMockMode
                     ? 'Simulated response. Connect the backend for Amazon Bedrock answers.'
