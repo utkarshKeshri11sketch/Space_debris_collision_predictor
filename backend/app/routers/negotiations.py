@@ -4,6 +4,7 @@ import uuid
 from fastapi import APIRouter, HTTPException
 
 from ..ai import negotiator
+from ..casestudy import service as casestudy
 from ..models import NegotiationStart, NegotiationStarted
 from ..physics import maneuver, screening
 from .sse import sse_response
@@ -29,9 +30,15 @@ def _side_options(detail: dict, conjunction_id: str) -> dict:
     return options
 
 
+def _find(conjunction_id: str):
+    if casestudy.is_case(conjunction_id):
+        return casestudy.get_conjunction(conjunction_id)
+    return screening.get_conjunction(conjunction_id)
+
+
 @router.post("", response_model=NegotiationStarted, status_code=201)
 def start(body: NegotiationStart):
-    conj = screening.get_conjunction(body.conjunctionId)
+    conj = _find(body.conjunctionId)
     if conj is None:
         raise HTTPException(404, "Conjunction not found.")
     if not (conj.primary.maneuverable and conj.secondary.maneuverable):
@@ -42,6 +49,11 @@ def start(body: NegotiationStart):
 @router.get("/{negotiation_id}/stream")
 def stream(negotiation_id: str):
     conjunction_id = negotiation_id.partition(_SEP)[2] if _SEP in negotiation_id else ""
+    if conjunction_id and casestudy.is_case(conjunction_id):
+        inputs = casestudy.negotiation_inputs(conjunction_id)
+        if inputs is None:
+            raise HTTPException(404, "Case study reconstruction is not available yet.")
+        return sse_response(negotiator.negotiate(*inputs))
     conj = screening.get_conjunction(conjunction_id) if conjunction_id else None
     if conj is None:
         raise HTTPException(404, "Negotiation expired. Start a new session.")

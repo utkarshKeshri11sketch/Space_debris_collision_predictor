@@ -3,6 +3,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from ..ai import generate_brief
+from ..casestudy import service as casestudy
 from ..models import Conjunction, ConjunctionDetail
 from ..physics import screening
 
@@ -25,6 +26,11 @@ def list_conjunctions(response: Response, days: float = Query(7, ge=0, le=7),
 
 @router.get("/{conjunction_id}", response_model=ConjunctionDetail)
 def get_conjunction(conjunction_id: str):
+    if casestudy.is_case(conjunction_id):  # past incident replayed through the same screens
+        found = casestudy.get_conjunction(conjunction_id)
+        if found is None:
+            raise HTTPException(404, "Case study reconstruction is not available yet.")
+        return found
     found = screening.get_conjunction(conjunction_id)
     if found is None:
         raise HTTPException(404, "Conjunction not found in this screening run.")

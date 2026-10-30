@@ -183,3 +183,79 @@ class AskToken(BaseModel):
     """One SSE data payload of /api/ask: {"type":"token","text":"..."}."""
     type: Literal["token"] = "token"
     text: str
+
+
+# ---- Case studies (past incidents replayed through OrbitSentinel). Not used by the frontend yet;
+# see docs/case_studies/CONTRACT.md. ----
+class SourcedFact(BaseModel):
+    text: str
+    source: str  # key into CaseStudy.sources
+
+
+class DatedFact(SourcedFact):
+    date: str
+
+
+class Source(BaseModel):
+    key: str
+    label: str
+    url: str
+
+
+class IncidentReality(BaseModel):
+    """What happened: the station moved. Burn size is not public, so it is reconstructed."""
+    moverNoradId: int
+    dvMs: float | None
+    propellantKg: float
+    massKg: float
+    ispS: float
+    basis: str  # how dvMs/propellantKg were obtained (reconstruction method)
+
+
+class Criterion(BaseModel):
+    name: str
+    weight: float
+    a: float
+    b: float
+
+
+class IncidentDecision(BaseModel):
+    """What OrbitSentinel's mediator recommends."""
+    moverSide: Literal["a", "b"]
+    moverNoradId: int
+    maneuver: ManeuverOption
+    criteria: list[Criterion]
+
+
+class IncidentNarrative(BaseModel):
+    reality: str
+    orbitSentinel: str
+    brief: str
+
+
+class IncidentComparison(BaseModel):
+    propellantSavedKg: float
+    propellantRatio: float
+    dvRealityMs: float | None
+    dvOrbitSentinelMs: float | None
+
+
+class CaseStudyStatus(BaseModel):
+    physics: Literal["ready", "pending", "error"]
+    ai: Literal["ready", "pending", "error"]
+
+
+class CaseStudy(BaseModel):
+    id: str
+    title: str
+    date: str
+    facts: list[SourcedFact]
+    aftermath: list[DatedFact]
+    sources: list[Source]
+    conjunction: ConjunctionDetail | None
+    reality: IncidentReality | None
+    orbitSentinel: IncidentDecision | None
+    narrative: IncidentNarrative | None
+    comparison: IncidentComparison | None
+    assumptions: list[str]
+    status: CaseStudyStatus
