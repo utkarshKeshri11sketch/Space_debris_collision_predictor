@@ -24,44 +24,53 @@ _None yet._
 
 _None yet._
 
-# Contract and integration requests
+# Screening integration requests (2026-10-30)
 
-## Screening -> Lead / Data / Physics
+1. **Data → Screening, open:** Supply a full, real cached `CatalogObject`
+   snapshot with native OMM in `backend/app/data/catalog.py`. Current Data
+   stub is synthetic. The screening API reads `load_catalog()` and
+   `catalog_meta()` but never refreshes GP itself. Keep one immutable snapshot
+   across Lambda instances for list/detail ID resolution. An active-only GP
+   snapshot was used for a limited ISS geometry check; it lacks debris and
+   rocket bodies. The 2-hour provider refresh limit still applies.
+2. **Lead → Screening, done:** Backend models and dependency declarations now
+   exist. Screening matches them. The list router accepts optional `noradId`
+   while preserving the existing response body, `days`, and `minPc`. Default
+   target comes from `SCREENING_TARGET_IDS`, or ISS 25544. Please confirm
+   whether the frontend will pass `noradId` for selected satellites.
+3. **Lead → Screening, open:** Surface `X-Screening-Complete: false` and
+   `X-Screening-Issues` in UI/monitoring. Invalid elements and unsupported
+   slow formation pairs make a run partial; an empty list alone is not an
+   all-clear. The run/detail caches are process local; for multi-Lambda
+   deployment keep the Data snapshot stable or add shared precomputation.
+4. **Physics → Screening, protocol done; integration pending:** `Encounter`
+   has the requested TCA state, names/IDs, sigmas, angle, radius and
+   `range_t_sec`; the root Physics branch version was exercised against it.
+   When `backend/app/physics/maneuver.py` lands, `plan_for_detail` will
+   replace the current computed do-nothing-only option. Add `afterSeries`
+   when a real propagated post-burn curve is available.
+5. **Lead/Data → Screening, open:** Provide a full catalog and SOCRATES
+   reference using matching element epochs for external validation. The
+   limited active-only check found 2 corresponding ISS TCAs within 0.65 s,
+   but different source element epochs changed miss distances by 1.4–7.3 km.
+   Another 94 SOCRATES references were slow formation/docking events outside
+   the 2D Pc model. No claim of SOCRATES pass or full-catalog Lambda timing.
+6. **Contract owner → Screening, open:** The frontend ellipse labels axes R/N.
+   A true encounter plane is perpendicular to relative velocity. Current
+   `covariance.angleDeg` uses projected primary radial as its first plane
+   axis; `rtnM` contains real primary RTN components. Label the drawing
+   schematic or add explicit plane coordinates in a future contract revision.
+7. **Lead → Screening, open:** Public GP lacks covariance and hard-body size.
+   Current type-specific values are marked `ASSUMED` in the detail brief.
+   Replace via `risk_model(primary, secondary, tca) -> EncounterUncertainty`
+   once measured CDM covariances and object dimensions are available.
+8. **Lead → Screening, open:** `backend/scripts/check_contract.py` passes the
+   screening list/detail and 10 other routes against the running local app,
+   but fails its negotiation success case: the synthetic catalog has no
+   computed conjunction between two maneuverable objects under its default
+   request. Please supply a real active-active event in the live snapshot or
+   a documented isolated negotiation fixture for this contract check. The
+   screening engine will not fabricate one in production output.
 
-1. `main` currently contains no backend skeleton or `app/models.py`. Screening
-   returns dictionaries matching the frontend exactly; Lead can validate them
-   through shared Pydantic models when those land. Please add runtime NumPy
-   and `sgp4` dependencies to the global backend dependency/deployment files.
-2. Data: supply cached frontend `CatalogObject` records with full OMM fields.
-   Screening never fetches remotely or bypasses the two-hour refresh limit.
-   Missing/invalid records are reported in `ScreeningRun.issues`.
-3. Lead: `GET /api/conjunctions` specifies only `days` and `minPc`. The product
-   also requires screening a selected satellite. Please define the protected
-   primary IDs and aggregate cached runs, or approve an optional `noradId`
-   query parameter. No frontend/contract changes were made by Screening.
-4. Lead: public GP has neither covariance nor dimensions. Explicitly supply
-   `risk_model(primary, secondary, tca) -> EncounterUncertainty`: each object's
-   RTN position covariance **at TCA** in m^2, combined hard-body radius in m,
-   provenance, and illustrative flag. Do not present guessed values as
-   measured. Detail briefs always retain the provided provenance.
-5. Physics: `Encounter` retains both TCA states and the original catalog
-   records. Helpers are `record_from_catalog`, `state_at`, `rtn_basis`, and
-   `collision_probability`. `run.get_detail(id, options=..., brief=...)`
-   accepts your manoeuvre options and AI's assessment; optional `afterSeries`
-   should be attached by the integration layer when a real burn curve exists.
-6. Lead: keep each run in cache so IDs from list/detail remain consistent.
-   Precompute full-catalog screening on refresh/a worker, rather than every
-   API request. Log/surface `issues` and `complete=False`; unsupported slow
-   encounters or failed objects must not appear as a clean screening result.
-7. Contract owner: the frontend's ellipse draws literal R/N axes. A general
-   encounter plane is perpendicular to relative velocity and is not exactly
-   R/N. `covariance.angleDeg` is relative to projected primary radial in that
-   plane; `rtnM` is real primary RTN. Please decide whether to label the
-   existing view schematic or eventually add plane-coordinate fields.
-8. Lead/Data: provide a timestamp-matched SOCRATES snapshot for external
-   comparison. No claim of SOCRATES validation or 30k-object Lambda timing
-   has been made. Search settings and assumptions are in
-   `tests/screening/README.md` and module comments.
-
-The AI branch also has requests in its copy of this document. Preserve both
-agents' entries when integrating these branches.
+Search settings, limits and validator commands are in
+`backend/tests/screening/README.md`.

@@ -678,6 +678,21 @@ def screen_catalog(catalog: Sequence[Any], primary_norad_id: int, *, risk_model:
                 chord_min = np.linalg.norm(relative[:, :-1] + projection[:, :, None] * delta, axis=2)
             padded = envelope_km + config.max_relative_acceleration_km_s2 * widths**2 / 8
             candidates = (chord_min <= padded[None, :]) & valid[:, :-1] & valid[:, 1:]
+            # Formation-flying/docked pairs can remain inside the 10 km
+            # envelope for every minute of the horizon. Their relative speed
+            # is below the domain of the instantaneous 2-D Pc model, and
+            # refining each minute would dominate runtime. SGP4 is smooth
+            # within this 128-minute chunk (no impulsive burns): if every
+            # sampled relative speed is below 0.01 km/s, exclude the chunk
+            # and surface the limitation as an issue, never as zero risk.
+            relative_speeds = np.linalg.norm(velocities - primary_velocities[None, :, :], axis=2)
+            slow_rows = np.max(relative_speeds, axis=1) < config.minimum_relative_speed_km_s
+            for row in np.flatnonzero(slow_rows & candidates.any(axis=1)):
+                secondary = batch[int(row)]
+                issues[secondary.norad_id, "slow_encounter"] = ScreeningIssue(
+                    secondary.norad_id, "slow_encounter",
+                    "relative speed too low for short-encounter Pc throughout a screening chunk")
+            candidates[slow_rows, :] = False
             # Sort chronologically within each pair, including across chunks.
             for row, interval in np.argwhere(candidates):
                 secondary = batch[int(row)]
