@@ -1,16 +1,19 @@
-"""OrbitSentinel AI layer: negotiator, Sentinel brief and Ask Sentinel.
+"""OrbitSentinel AI layer: negotiator, Sentinel brief and Ask Sentinel. Free LLM providers only.
 
-Public entry points (all take/return plain JSON-shaped dicts using the frontend's camelCase field
-names, so they do not depend on app/models.py):
+Public entry points (plain JSON-shaped dicts, frontend camelCase field names, no dependency on app/models.py):
 
-    negotiate(context)        -> async iterator of NegotiationEvent dicts
-    conjunction_brief(detail) -> str   (template; no network)
-    generate_brief(detail)    -> str   (LLM with template fallback, cached)
-    overview_brief(items)     -> str   (dashboard-level summary, template)
-    ask_stream(question, ctx) -> async iterator of answer text chunks
+    negotiate(conjunction, sat_a, sat_b, options)        async iterator of NegotiationEvent dicts
+    negotiate_override(..., rejected)                    same, after a human rejects the recommendation
+    brief(target, conjunctions) / generate_brief(detail) str for ConjunctionDetail.brief / dashboard
+    ask(question, context) / ask_stream(question, ctx)   str / async iterator of text chunks
+    call_llm(system, messages, stream, json_mode)        the single LLM entry point (groq>gemini>cerebras>cached)
 """
-from .ask import ask_stream
-from .brief import conjunction_brief, generate_brief, overview_brief
-from .negotiator import negotiate
+from .ask import ask, ask_stream
+from .brief import brief, conjunction_brief, generate_brief, overview_brief
+from .llm import LLMUnavailable, call_llm
+from .negotiator import negotiate, negotiate_override
 
-__all__ = ["ask_stream", "conjunction_brief", "generate_brief", "negotiate", "overview_brief"]
+__all__ = [
+    "LLMUnavailable", "ask", "ask_stream", "brief", "call_llm", "conjunction_brief", "generate_brief",
+    "negotiate", "negotiate_override", "overview_brief",
+]
