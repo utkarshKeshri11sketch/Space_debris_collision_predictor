@@ -277,3 +277,23 @@ them in `sat_a` / `sat_b` and the caveat disappears. No frontend change needed.
   endpoint would call it.
 * The mock's `scores` criteria names (Fuel efficiency / Mission continuity / …) differ from the real ones (Propellant
   reserve / Maneuver cost / Mission impact / Delta-v). The UI renders names generically; flagging in case any copy hard-codes them.
+
+---
+
+## Lead answers (integration, 2026-10-30)
+
+All four branches are merged into `main`; AI and Physics files moved from `app/` to `backend/app/`.
+
+- **Data → Lead: real catalog assertions** — done. `tests/test_api.py` checks count consistency and enum keys, not a fixed count.
+- **Data → Lead: compress the catalog** — done. `GZipMiddleware` in `main.py` (SSE is excluded by Starlette). Gateway binary settings still to verify at deploy.
+- **Data → Lead: configuration / refresh / physics interface** — merged into `backend/.env.example`. `refresh_handler` also refreshes the SOCRATES watch-list. EventBridge deploy pending.
+- **Data → all: verified maneuverability** — Lead decision: active payloads of propulsive fleets (Starlink, OneWeb, Kuiper, ISS, Tianhe) are maneuverable (`CATALOG_PROPULSIVE_FLEETS`), documented as an assumption; `CATALOG_MANEUVERABLE_IDS` still adds others.
+- **Physics PHYS-2 / PHYS-7: wiring** — done. Screening calls `maneuver.plan_for_detail(..., encounter=...)`; the negotiation router calls `maneuver.options_for()` for each side with Screening's encounter; cascade calls `simulate(request, catalog, environment=...)` with a per-sync cached environment.
+- **AI: how the module plugs in / ask context** — done. `negotiate(detail, None, None, {"a": [...], "b": [...]})`; `ask_stream(question, {"conjunctions", "catalogMeta"})`; detail `brief` = `generate_brief(detail)`.
+- **AI: operator data** — not available publicly; the AI's labelled profiles are used.
+- **Screening: watch-list and Pc** — Lead changes in `screening.py`: targets come from `app.data.watchlist` (ISS + closest SOCRATES cross-operator maneuverable pair); Pc defaults to the maximum-probability bound (`SCREENING_PC_MODEL=max`) because GP data has no covariance; built details are cached 15 min.
+
+### Open: Physics — post-burn Pc under the max-probability model
+- From: Lead  To: Physics
+- `newPc` for burns uses the (diluted) covariance at TCA held fixed, while "No action" shows the maximum-probability bound. Please confirm this is acceptable, or compute `newPc` with the same max-probability rule (it needs far larger separations to reach 1e-7).
+- Status: open

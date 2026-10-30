@@ -25,8 +25,8 @@ AWS Lambda (Mangum) + API Gateway, S3, EventBridge, Amazon Bedrock (Gemini/cache
 
 | Agent | Owns | Branch |
 | --- | --- | --- |
-| Lead (Claude #1) | `backend/app/main.py`, `backend/app/models.py`, `backend/app/routers/`, `backend/app/mock_data.py`, `backend/scripts/`, deploy, docs | `main` (integration) |
-| Data (Codex #1) | `backend/app/data/` + `backend/tests/data/` | `be-data` |
+| Lead (Claude #1) | `backend/app/main.py`, `backend/app/models.py`, `backend/app/routers/`, `backend/app/warmup.py`, `backend/scripts/`, deploy, docs | `main` (integration) |
+| Data (Codex #1, handed to Lead on 2026-10-30) | `backend/app/data/` + `backend/tests/data/` | `be-data` (merged) |
 | Screening (Codex #2) | `backend/app/physics/screening.py` + `backend/tests/screening/` | `be-screening` |
 | Physics (Claude #2) | `backend/app/physics/maneuver.py`, `cascade.py` + `backend/tests/physics/` | `be-physics` |
 | AI (Claude #3) | `backend/app/ai/` + `backend/tests/ai/` | `be-ai` |
@@ -41,29 +41,33 @@ AWS Lambda (Mangum) + API Gateway, S3, EventBridge, Amazon Bedrock (Gemini/cache
 - Never invent physics numbers silently: document every assumption in code comments.
 - No secrets in code; use env vars (`backend/.env.example`).
 
-## How the shell works
+## How the backend fits together (integrated 2026-10-30)
 
-Every endpoint already answers with the frontend's mock data. Routers call **stub functions** in your
-folder; each stub currently delegates to `app/mock_data.py`. Your job: replace the stub body, keep the
-signature and return type, and keep `scripts/check.sh` green.
+All four areas are merged into `main` and the routers call the real code. No mock data is served.
 
-| Endpoint | Router | Calls (owner) |
+| Endpoint | Router | Real implementation |
 | --- | --- | --- |
 | `GET /api/health` | `main.py` | — |
-| `GET /api/catalog` → `CatalogObject[]` | `routers/catalog.py` | `data.catalog.load_catalog()` (Data) |
-| `GET /api/catalog/meta` → `CatalogMeta` | `routers/catalog.py` | `data.catalog.catalog_meta()` (Data) |
-| `GET /api/conjunctions?days=7&minPc=1e-6` → `Conjunction[]` | `routers/conjunctions.py` | `physics.screening.screen()` (Screening) |
-| `GET /api/conjunctions/{id}` → `ConjunctionDetail` / 404 | `routers/conjunctions.py` | `physics.screening.get_conjunction()` (Screening), `options` from `physics.maneuver.options()` (Physics), `brief` (AI) |
-| `POST /api/negotiations {conjunctionId}` → 201 `{negotiationId}` / 404 / 422 | `routers/negotiations.py` | — |
-| `GET /api/negotiations/{id}/stream` → SSE `NegotiationEvent` | `routers/negotiations.py` | `ai.negotiator.negotiate()` (AI) |
-| `POST /api/cascade CascadeRequest` → `CascadeResult` / 404 | `routers/cascade.py` | `physics.cascade.simulate()` (Physics) |
-| `POST /api/ask {question}` → SSE `{"type":"token","text"}` / 400 | `routers/ask.py` | `ai.ask.ask()` (AI) |
+| `GET /api/catalog` / `GET /api/catalog/meta` | `routers/catalog.py` | `data.catalog.load_catalog()` / `catalog_meta()` (gzipped) |
+| `GET /api/conjunctions?days&minPc` | `routers/conjunctions.py` | `physics.screening.screen()` over the watch-list from `data.watchlist` |
+| `GET /api/conjunctions/{id}` | `routers/conjunctions.py` | `screening.get_conjunction()` + options from `physics.maneuver` + brief from `ai.generate_brief()` |
+| `POST /api/negotiations` + `GET /{id}/stream` (SSE) | `routers/negotiations.py` | `ai.negotiate()` with per-side options from `maneuver.options_for()` |
+| `POST /api/cascade` | `routers/cascade.py` | `physics.cascade.simulate(request, catalog)` |
+| `POST /api/ask` (SSE) | `routers/ask.py` | `ai.ask_stream(question, {conjunctions, catalogMeta})` |
 
-SSE format: each event is `data: <json>\n\n`; the stream ends with `data: [DONE]\n\n`. Routers add the
-framing — your generators just yield dicts (negotiator) or strings (ask). Errors: JSON `{"message": "..."}`
-with a 4xx status, or an in-stream `{"type":"error","message":"..."}` event.
+Real-data decisions (Lead):
+- **Catalog**: CelesTrak GP (active + DEB + R/B), refreshed by `python -m app.data.refresh`; until a
+  refresh succeeds the bundled July 2025 archive is served (Screening refuses it as too old).
+- **Maneuverable** = active payload of a propulsive fleet (Starlink, OneWeb, Kuiper, ISS, Tianhe) or
+  listed in `CATALOG_MANEUVERABLE_IDS`. An assumption, not operator-verified.
+- **Watch-list** = ISS + the closest real cross-operator maneuverable pair from CelesTrak SOCRATES.
+  SOCRATES only picks what we screen; all numbers come from our own SGP4 screening.
+- **Pc** = worst-case (maximum) probability over covariance scale (Alfano 2005, SOCRATES MAX_PROB),
+  because public GP data has no covariance. `SCREENING_PC_MODEL=assumed` restores the per-type model.
+- **Speed**: a background warm-up screens at startup and every 10 min; first results take minutes.
 
-Negotiation weights for the mediator: propellant reserve 35%, maneuver cost 25%, mission impact 20%, Δv 20%.
+SSE format: each event is `data: <json>` followed by a blank line; the stream ends with `data: [DONE]`. Errors: JSON
+`{"message": "..."}` with a 4xx status, or an in-stream `{"type":"error","message":"..."}` event.
 
 ## Run and test
 
@@ -72,7 +76,8 @@ cd backend
 python -m pip install -r requirements.txt
 cp .env.example .env              # optional
 python -m uvicorn app.main:app --reload --port 8000
-python -m pytest -q               # in-process contract tests
+python -m app.data.refresh       # download the live CelesTrak catalog + SOCRATES (max once / 2 h)
+python -m pytest -q               # all areas: data, screening, physics, ai, API contract
 bash scripts/check.sh             # starts a server, hits every endpoint, validates against models.py
 ```
 

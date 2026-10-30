@@ -511,6 +511,10 @@ class ScreeningRun:
         raise KeyError(conjunction_id)
 
 
+def _pc_model() -> str:
+    return os.getenv("SCREENING_PC_MODEL", "max").strip().lower()
+
+
 def _encounter(primary: CatalogRecord, secondary: CatalogRecord, at: datetime,
                risk_model: RiskModel, config: ScreeningConfig) -> Encounter:
     pr, pv = state_at(primary, at)
@@ -536,8 +540,22 @@ def _encounter(primary: CatalogRecord, secondary: CatalogRecord, at: datetime,
     combined = (rb_primary.T @ uncertainty.primary_covariance_rtn_m2 @ rb_primary
                 + rb_secondary.T @ uncertainty.secondary_covariance_rtn_m2 @ rb_secondary)
     covariance = plane @ combined @ plane.T
+    miss_plane_m = plane @ (sr - pr) * 1000
+    pc = collision_probability(miss_plane_m, covariance, uncertainty.hard_body_radius_m)
+    if _pc_model() == "max":
+        # Lead decision (2026-10-30): public GP data carries NO covariance, so report the
+        # maximum probability over covariance scale (Alfano 2005, "Relating position
+        # uncertainty to maximum conjunction probability"; CelesTrak SOCRATES MAX_PROB).
+        # The assumed per-type covariance only fixes the ellipse SHAPE; it is scaled by k^2,
+        # and for a small hard body Pc(k) peaks at k^2 = (m^T C^-1 m) / 2. A worst-case bound,
+        # not an estimate. SCREENING_PC_MODEL=assumed restores the unscaled assumed covariance.
+        scale = float(miss_plane_m @ np.linalg.solve(covariance, miss_plane_m)) / 2
+        if scale > 1:
+            diluted = covariance * scale
+            pc_max = collision_probability(miss_plane_m, diluted, uncertainty.hard_body_radius_m)
+            if pc_max > pc:
+                pc, covariance = pc_max, diluted
     eigenvalues, axes = np.linalg.eigh(covariance)
-    pc = collision_probability(plane @ (sr - pr) * 1000, covariance, uncertainty.hard_body_radius_m)
     risk = "critical" if pc >= config.critical_pc else "high" if pc >= config.high_pc else "watch"
     # Full orbital fields bind IDs to a catalog snapshot, not mutable globals.
     identity = json.dumps([primary.catalog["omm"], secondary.catalog["omm"], _iso(at)],
@@ -729,6 +747,8 @@ _LOG = logging.getLogger(__name__)
 _API_LOCK = RLock()
 _RUN_CACHE: OrderedDict[tuple[str, int, float], tuple[float, ScreeningRun, str]] = OrderedDict()
 _DETAIL_CACHE: OrderedDict[str, tuple[float, Encounter, str]] = OrderedDict()
+# Lead: maneuver planning per event costs ~0.2 s; reuse a built detail for the run-cache lifetime.
+_MODEL_CACHE: OrderedDict[str, tuple[float, Any]] = OrderedDict()
 _STATUS: ContextVar[dict[str, Any]] = ContextVar("screening_status", default={})
 _ID_PATTERN = re.compile(r"^(\d{1,9})-(\d{1,9})-(\d{8}T\d{12}Z)-[0-9a-f]{20}$")
 
@@ -797,6 +817,18 @@ def _remember(encounter: Encounter, source: str) -> None:
 
 
 def _detail_model(encounter: Encounter, source: str) -> ConjunctionDetail:
+    cached = _MODEL_CACHE.get(encounter.id)
+    if cached is not None and monotonic() - cached[0] < 900:
+        return cached[1]
+    model = _build_detail_model(encounter, source)
+    _MODEL_CACHE[encounter.id] = monotonic(), model
+    _MODEL_CACHE.move_to_end(encounter.id)
+    while len(_MODEL_CACHE) > 1024:
+        _MODEL_CACHE.popitem(last=False)
+    return model
+
+
+def _build_detail_model(encounter: Encounter, source: str) -> ConjunctionDetail:
     from ..models import ConjunctionDetail
     from . import maneuver
     event = encounter.as_conjunction()
@@ -833,14 +865,19 @@ def screen(target_id: int | None = None, days: float = 7,
         _positive(days, "days", zero=True)
         if days > 7 or not math.isfinite(min_pc) or not 0 <= min_pc <= 1:
             raise ScreeningError("days must be 0..7 and minPc must be 0..1")
-        targets = ([_catalog_id(target_id)] if target_id is not None else
-                   [_catalog_id(part.strip()) for part in os.getenv("SCREENING_TARGET_IDS", "25544").split(",")])
         if days == 0:
             _STATUS.set({"complete": True, "issues": 0, "source": "No screening horizon"})
             return []
         with _API_LOCK:
             catalog, source, fingerprint = _snapshot()
             available = {entry["noradId"] for entry in catalog}
+            if target_id is not None:
+                targets = [_catalog_id(target_id)]
+            else:
+                # Lead integration: watch-list = ISS + SOCRATES-selected maneuverable pairs.
+                from ..data.watchlist import targets as watchlist_targets
+                maneuverable = {entry["noradId"] for entry in catalog if entry.get("maneuverable")}
+                targets = [_catalog_id(t) for t in watchlist_targets(maneuverable, available)] or [25544]
             missing = set(targets) - available
             if missing:
                 raise HTTPException(404, f"Target not in catalog: {sorted(missing)}")

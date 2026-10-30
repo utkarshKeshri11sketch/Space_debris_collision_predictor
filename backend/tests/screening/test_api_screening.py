@@ -44,7 +44,8 @@ def test_real_computation_reaches_list_detail_and_selected_target_routes(api):
     assert detail_response.status_code == 200
     detail = ConjunctionDetail.model_validate(detail_response.json())
     assert len(detail.rangeSeries) == 81
-    assert "ASSUMED" in detail.brief and "TEST synthetic OMM" in detail.brief
+    # Lead integration: the detail brief is the AI Sentinel brief built from these computed numbers.
+    assert "human operator must approve" in detail.brief.lower()
     assert detail.options[0].direction == "none"
     assert client.get("/api/conjunctions/no-such-event").status_code == 404
     reversed_response = client.get("/api/conjunctions?noradId=123456789&days=0.02&minPc=0")

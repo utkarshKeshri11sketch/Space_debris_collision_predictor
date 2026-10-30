@@ -29,7 +29,8 @@ def odds(pc: float) -> str:
 
 
 def kg(value: float) -> str:
-    return f"{value:.2f} kg" if value >= 0.01 or value == 0 else f"{value:.3f} kg"
+    # Electric-propulsion avoidance burns on real events can cost well under a gram.
+    return f"{value:.2f} kg" if value >= 0.01 or value == 0 else f"{value:.2g} kg"
 
 
 def dv(value: float) -> str:
@@ -61,3 +62,8 @@ def hours(value: float) -> str:
     if value < 1:
         return f"{round(value * 60)} minutes"
     return f"{value:.1f} hours".replace(".0 hours", " hours")
+
+
+def speed(kms: float) -> str:
+    """Relative speed, e.g. 12.7 km/s (real screening gives full float precision)."""
+    return f"{float(kms):.1f} km/s"

@@ -2,19 +2,35 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from . import warmup
 from .routers import ask, cascade, catalog, conjunctions, negotiations
 
-app = FastAPI(title="OrbitSentinel API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    stop = warmup.start()
+    yield
+    if stop is not None:
+        stop.set()
+
+
+app = FastAPI(title="OrbitSentinel API", version="0.1.0", lifespan=lifespan)
 
 origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
-app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"],
+                   expose_headers=["X-Screening-Complete", "X-Screening-Issues", "X-Screening-As-Of"])
+# The full catalog is ~14.5 MB of JSON (~2 MB gzipped); Lambda's buffered limit is 6 MB.
+# SSE responses are excluded by Starlette's GZip middleware, so streaming still works.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 @app.exception_handler(RequestValidationError)

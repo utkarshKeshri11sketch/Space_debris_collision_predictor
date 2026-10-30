@@ -424,7 +424,7 @@ async def _run(setup: Setup, llm, rebuttals: bool, rejected: dict | None) -> Asy
         if override_note:
             yield _msg("mediator", 5, override_note)
         else:
-            yield _msg("mediator", 0, f"Screening shows {a.name} and {b.name} passing {fmt.distance(conj['missDistanceM'])} apart at {conj['relSpeedKms']} km/s, collision probability {fmt.probability(conj['pc'])}. Both spacecraft can maneuver, so each operator should state its case before I score the options.")
+            yield _msg("mediator", 0, f"Screening shows {a.name} and {b.name} passing {fmt.distance(conj['missDistanceM'])} apart at {fmt.speed(conj['relSpeedKms'])}, collision probability {fmt.probability(conj['pc'])}. Both spacecraft can maneuver, so each operator should state its case before I score the options.")
             transcript: list[str] = []
             # Round 1: B sees A's argument. Round 2 (rebuttals): both answer round 1, so they are generated together.
             plan = [(1, "argue", [("A", "agentA")]), (1, "argue", [("B", "agentB")])]

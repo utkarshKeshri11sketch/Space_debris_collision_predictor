@@ -77,7 +77,7 @@ def conjunction_brief(detail: Mapping[str, Any], *, now: datetime | None = None,
     when = "" if h is None else (" earlier today" if h < 0 else f" in {fmt.hours(h)}")
     pc = detail["pc"]
     sentences = [
-        f"{p['name']} and {s['name']} will pass {fmt.distance(detail['missDistanceM'])} apart{when} (their closest approach) at {detail['relSpeedKms']} km/s.",
+        f"{p['name']} and {s['name']} will pass {fmt.distance(detail['missDistanceM'])} apart{when} (their closest approach) at {fmt.speed(detail['relSpeedKms'])}.",
         f"The chance they collide is {fmt.probability(pc)}, about {fmt.odds(pc)}, which is {'serious enough that operators normally act' if pc >= ACT_PC else 'low enough to keep watching rather than act'}.",
         _maneuver_sentence(p, s),
     ]

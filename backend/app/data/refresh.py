@@ -262,10 +262,21 @@ def refresh_handler(event, context) -> dict:
     """AWS handler app.data.refresh.refresh_handler, EventBridge rate(6 hours)."""
     result = fetch_catalog()
     LOG.info("Catalog refresh: %s", asdict(result))
+    _refresh_watchlist()
     return asdict(result)
+
+
+def _refresh_watchlist() -> None:
+    """SOCRATES candidates for the screening watch-list; failure keeps the previous list."""
+    from .watchlist import refresh_socrates
+    try:
+        LOG.info("SOCRATES watch-list candidates: %s", refresh_socrates())
+    except Exception as exc:  # noqa: BLE001 - a stale watch-list must not fail the catalog refresh
+        LOG.warning("SOCRATES refresh failed; keeping previous watch-list: %s", exc)
 
 
 if __name__ == "__main__":
     result = fetch_catalog()
+    _refresh_watchlist()
     print(json.dumps(asdict(result)))
     raise SystemExit(1 if result.status == "error" else 0)

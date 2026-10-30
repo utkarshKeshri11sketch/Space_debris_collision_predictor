@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,6 +26,21 @@ TYPE_MAP = {"PAY": "PAYLOAD", "PAYLOAD": "PAYLOAD", "DEB": "DEBRIS",
             "DEBRIS": "DEBRIS", "R/B": "ROCKET_BODY", "ROCKET BODY": "ROCKET_BODY",
             "ROCKET_BODY": "ROCKET_BODY", "UNK": "UNKNOWN", "UNKNOWN": "UNKNOWN"}
 ACTIVE_STATUSES = frozenset({"+", "P", "B", "S", "X"})
+# ASSUMPTION (Lead): active payloads of these fleets are treated as maneuverable. Each fleet
+# publicly flies onboard propulsion and routinely performs collision avoidance (SpaceX/OneWeb/
+# Amazon filings, NASA ISS debris-avoidance maneuvers, CMSA reports for Tianhe). Name prefix +
+# active status is NOT operator-verified capability; CATALOG_MANEUVERABLE_IDS adds others, and
+# CATALOG_PROPULSIVE_FLEETS="" disables this rule.
+DEFAULT_PROPULSIVE_FLEETS = ("STARLINK", "ONEWEB", "KUIPER", "ISS (ZARYA)", "CSS (TIANHE)")
+
+
+def propulsive_fleets() -> tuple[str, ...]:
+    raw = os.environ.get("CATALOG_PROPULSIVE_FLEETS")
+    if raw is None:
+        return DEFAULT_PROPULSIVE_FLEETS
+    return tuple(part.strip().upper() for part in raw.split(",") if part.strip())
+
+
 REQUIRED_NUMBERS = ("MEAN_MOTION", "ECCENTRICITY", "INCLINATION", "RA_OF_ASC_NODE",
                     "ARG_OF_PERICENTER", "MEAN_ANOMALY", "BSTAR",
                     "MEAN_MOTION_DOT", "MEAN_MOTION_DDOT")
@@ -134,7 +150,7 @@ class OrbitRecord:
 
 
 def parse_record(raw: dict, metadata: dict, active_ids: frozenset[int],
-                 maneuverable_ids: frozenset[int]) -> OrbitRecord:
+                 maneuverable_ids: frozenset[int], fleets: tuple[str, ...] = ()) -> OrbitRecord:
     fields = normalize_omm(raw)
     norad_id = int(fields["NORAD_CAT_ID"])
     status = str(metadata.get("OPS_STATUS_CODE") or "").strip()
@@ -147,9 +163,10 @@ def parse_record(raw: dict, metadata: dict, active_ids: frozenset[int],
     error, _, _ = sat.sgp4(sat.jdsatepoch, sat.jdsatepochF)
     if error:
         raise ValueError(f"SGP4 rejected {norad_id} at element epoch (code {error})")
-    record = CatalogObject(noradId=norad_id, name=str(fields["OBJECT_NAME"]), type=kind,
-                           active=active, maneuverable=active and norad_id in maneuverable_ids,
-                           omm=fields)
+    name = str(fields["OBJECT_NAME"])
+    maneuverable = active and (norad_id in maneuverable_ids or name.upper().startswith(fleets))
+    record = CatalogObject(noradId=norad_id, name=name, type=kind,
+                           active=active, maneuverable=maneuverable, omm=fields)
     # Match the inspector's two-body mean-altitude convention, NOT a propagated
     # WGS84 geodetic altitude. mu in km^3/s^2, equatorial radius in km.
     n = float(fields["MEAN_MOTION"]) * 2 * math.pi / 86400
@@ -160,13 +177,14 @@ def parse_record(raw: dict, metadata: dict, active_ids: frozenset[int],
 
 
 @lru_cache(maxsize=2)
-def _parse_snapshot(snapshot: Snapshot, maneuverable_ids: frozenset[int]) -> dict[int, OrbitRecord]:
+def _parse_snapshot(snapshot: Snapshot, maneuverable_ids: frozenset[int],
+                    fleets: tuple[str, ...] = ()) -> dict[int, OrbitRecord]:
     records: dict[int, OrbitRecord] = {}
     for raw in snapshot.records:
         try:
             identifier = int(raw["NORAD_CAT_ID"])
             entry = parse_record(raw, snapshot.satcat.get(str(identifier), {}),
-                                 snapshot.active_ids, maneuverable_ids)
+                                 snapshot.active_ids, maneuverable_ids, fleets)
         except (ValueError, KeyError, TypeError, OverflowError) as exc:
             LOG.warning("Skipping invalid cached OMM record: %s", exc)
             continue
@@ -186,13 +204,13 @@ def load_catalog() -> list[CatalogObject]:
 def load_orbit_catalog() -> dict[int, OrbitRecord]:
     """NORAD-keyed metadata + Satrec objects for Screening/Physics (cache reads only)."""
     settings = Settings.from_env()
-    return dict(_parse_snapshot(read_snapshot(settings), settings.maneuverable_ids))
+    return dict(_parse_snapshot(read_snapshot(settings), settings.maneuverable_ids, propulsive_fleets()))
 
 
 def catalog_meta() -> CatalogMeta:
     settings = Settings.from_env()
     snapshot = read_snapshot(settings)
-    records = _parse_snapshot(snapshot, settings.maneuverable_ids)
+    records = _parse_snapshot(snapshot, settings.maneuverable_ids, propulsive_fleets())
     counts = dict.fromkeys(OBJECT_TYPES, 0)
     for record in records.values():
         counts[record.type] += 1

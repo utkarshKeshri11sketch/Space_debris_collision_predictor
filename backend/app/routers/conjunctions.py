@@ -1,9 +1,13 @@
+import logging
+
 from fastapi import APIRouter, HTTPException, Query, Response
 
+from ..ai import generate_brief
 from ..models import Conjunction, ConjunctionDetail
 from ..physics import screening
 
 router = APIRouter(prefix="/api/conjunctions", tags=["conjunctions"])
+LOG = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[Conjunction])
@@ -24,4 +28,9 @@ def get_conjunction(conjunction_id: str):
     found = screening.get_conjunction(conjunction_id)
     if found is None:
         raise HTTPException(404, "Conjunction not found in this screening run.")
+    try:
+        # Sentinel brief from the AI layer (template, or a grounded LLM text when a provider is set).
+        found = found.model_copy(update={"brief": generate_brief(found.model_dump())})
+    except Exception:  # noqa: BLE001 - keep Screening's factual brief if the AI layer fails
+        LOG.exception("Sentinel brief failed for %s", conjunction_id)
     return found
