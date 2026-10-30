@@ -223,6 +223,7 @@ class IncidentDecision(BaseModel):
     """What OrbitSentinel's mediator recommends."""
     moverSide: Literal["a", "b"]
     moverNoradId: int
+    moverMassKg: float
     maneuver: ManeuverOption
     criteria: list[Criterion]
     alternative: ManeuverOption | None = None  # the other side's best burn, for the comparison

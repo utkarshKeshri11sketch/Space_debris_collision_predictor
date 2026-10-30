@@ -1,4 +1,4 @@
-import type { CascadeRequest, CascadeResult, CatalogMeta, CatalogObject, Conjunction, ConjunctionDetail, NegotiationEvent } from './types';
+import type { CascadeRequest, CascadeResult, CaseStudy, CaseStudySummary, CatalogMeta, CatalogObject, Conjunction, ConjunctionDetail, NegotiationEvent } from './types';
 export const isMockMode = import.meta.env.VITE_USE_MOCKS !== 'false';
 const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 export const apiUrl = (path: string) => `${baseUrl}${path}`;
@@ -65,6 +65,8 @@ export const api = {
     onEvent(event);
   }),
   cascade: (request: CascadeRequest, signal?: AbortSignal) => json<CascadeResult>('/api/cascade', post(request, signal)),
+  caseStudies: (signal?: AbortSignal) => json<CaseStudySummary[]>('/api/case-studies', { signal }),
+  caseStudy: (id: string, signal?: AbortSignal) => json<CaseStudy>(`/api/case-studies/${encodeURIComponent(id)}`, { signal }),
   ask: (question: string, onToken: (token: string) => void, signal?: AbortSignal) => stream('/api/ask', { ...post({ question }, signal), headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' } }, (data) => {
     try {
       const token = JSON.parse(data) as string | { type?: string; text?: string; token?: string; message?: string };

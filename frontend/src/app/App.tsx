@@ -15,6 +15,7 @@ const ConjunctionScreen = lazy(() => import('../features/conjunction/Conjunction
 const NegotiatorScreen = lazy(() => import('../features/negotiator/NegotiatorScreen'));
 const CascadeScreen = lazy(() => import('../features/cascade/CascadeScreen'));
 const AlertScreen = lazy(() => import('../features/conjunction/AlertScreen'));
+const CaseStudyScreen = lazy(() => import('../features/case-study/CaseStudyScreen'));
 const speeds = [1, 60, 600, 3600];
 const utc = (ms: number) => new Date(ms).toISOString().slice(11, 19);
 const dateUtc = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -53,7 +54,9 @@ export default function App() {
       !sessionStorage.getItem('orbit-intro') &&
       !matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
-  const mode = location.pathname.startsWith('/cascade')
+  const mode = location.pathname.startsWith('/case-study')
+    ? 'casestudy'
+    : location.pathname.startsWith('/cascade')
     ? 'cascade'
     : location.pathname.startsWith('/negotiator')
       ? 'negotiator'
@@ -177,6 +180,7 @@ export default function App() {
           </NavLink>
           <NavLink to={`/negotiator/${navNegotiation ?? 'starlink-oneweb'}`}>Negotiator</NavLink>
           <NavLink to="/cascade">Cascade Lab</NavLink>
+          <NavLink to="/case-study">Case Study</NavLink>
         </nav>
         <div className="topbar-tools">
           <span className="sync">
@@ -211,7 +215,7 @@ export default function App() {
             }
           >
             <OrbitalScene
-              mode={mode}
+              mode={mode === 'casestudy' ? 'mission' : mode}
               selectedId={selectedId}
               conjunction={
                 mode === 'conjunction' || mode === 'negotiator' ? conjunction : undefined
@@ -242,7 +246,9 @@ export default function App() {
               Mission control <span className="eyebrow-separator">/</span>{' '}
               {mode === 'mission'
                 ? 'Orbital environment'
-                : mode === 'cascade'
+                : mode === 'casestudy'
+                  ? 'PAST INCIDENT REPLAY'
+                  : mode === 'cascade'
                   ? 'LONG-TERM EVOLUTION'
                   : mode === 'negotiator'
                     ? 'OPERATOR COORDINATION'
@@ -251,7 +257,9 @@ export default function App() {
             <h1>
               {mode === 'mission'
                 ? 'Orbital overview'
-                : mode === 'cascade'
+                : mode === 'casestudy'
+                  ? 'Case study'
+                  : mode === 'cascade'
                   ? 'Cascade simulation'
                   : mode === 'negotiator'
                     ? 'Operator coordination'
@@ -384,6 +392,12 @@ export default function App() {
               />
             )}
             {mode === 'cascade' && <CascadeScreen onResult={setCascade} onYear={setCascadeYear} />}
+            {mode === 'casestudy' && (
+              <CaseStudyScreen
+                caseId={location.pathname.split('/')[2] || undefined}
+                onSelect={(id) => navigate(`/case-study/${id}`)}
+              />
+            )}
           </Suspense>
         )}
         {mode !== 'mission' && (

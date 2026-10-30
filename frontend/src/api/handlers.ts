@@ -1,6 +1,10 @@
 import { delay, http, HttpResponse } from 'msw';
 import type { CascadeRequest } from './types';
 import { getMockCatalog, getMockMeta, mockConjunctions, getMockCascade, negotiationEvents, sentinelBrief } from './mockData';
+import caseStudyFixtures from './caseStudyFixtures.json';
+
+type CaseFixtures = { list: unknown[]; cases: Record<string, unknown>; negotiations: Record<string, unknown[]> };
+const caseFixtures = caseStudyFixtures as unknown as CaseFixtures;
 const negotiatedEvents = new Map<string, string>();
 const encoder = new TextEncoder();
 function eventResponse(events: unknown[], intervalMs: number) {
@@ -33,8 +37,18 @@ export const handlers = [
     const event = mockConjunctions.find((item) => item.id === params.id);
     return event ? HttpResponse.json(event) : HttpResponse.json({ message: 'Conjunction not found in this screening run.' }, { status: 404 });
   }),
+  http.get('*/api/case-studies', () => HttpResponse.json(caseFixtures.list)),
+  http.get('*/api/case-studies/:id', ({ params }) => {
+    const found = caseFixtures.cases[String(params.id)];
+    return found ? HttpResponse.json(found) : HttpResponse.json({ message: 'Case study not found.' }, { status: 404 });
+  }),
   http.post('*/api/negotiations', async ({ request }) => {
     const body = await request.json() as { conjunctionId?: string };
+    if (body.conjunctionId && caseFixtures.negotiations[body.conjunctionId]) {
+      const negotiationId = crypto.randomUUID();
+      negotiatedEvents.set(negotiationId, body.conjunctionId);
+      return HttpResponse.json({ negotiationId }, { status: 201 });
+    }
     const event = mockConjunctions.find((item) => item.id === body.conjunctionId);
     if (!event) return HttpResponse.json({ message: 'Conjunction not found.' }, { status: 404 });
     if (!event.primary.maneuverable || !event.secondary.maneuverable) return HttpResponse.json({ message: 'Negotiation requires two maneuverable spacecraft.' }, { status: 422 });
@@ -46,6 +60,8 @@ export const handlers = [
     const id = String(params.id);
     const conjunctionId = negotiatedEvents.get(id);
     if (!conjunctionId) return HttpResponse.json({ message: 'Negotiation expired. Start a new session.' }, { status: 404 });
+    const replay = caseFixtures.negotiations[conjunctionId];
+    if (replay) return eventResponse(replay, 900);
     return eventResponse(negotiationEvents(conjunctionId), 1350);
   }),
   http.post('*/api/cascade', async ({ request }) => {

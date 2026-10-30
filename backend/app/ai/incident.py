@@ -63,7 +63,7 @@ def recommend(conjunction: Mapping[str, Any], options_by_side: Mapping[str, Any]
         maneuver = {**maneuver, "id": f"{maneuver['id']}-split", "dvMs": round(maneuver["dvMs"] * share, 3),
                     "propellantKg": round(maneuver["propellantKg"] * share, 4)}
     mover = setup.sat(dec.mover)
-    return {"moverSide": dec.mover.lower(), "moverNoradId": int(mover.ref["noradId"]),
+    return {"moverSide": dec.mover.lower(), "moverNoradId": int(mover.ref["noradId"]), "moverMassKg": mover.mass_kg,
             "maneuver": {**maneuver, "recommended": True}, "criteria": rows,
             "alternative": dict(opts["B" if dec.mover == "A" else "A"])}
 

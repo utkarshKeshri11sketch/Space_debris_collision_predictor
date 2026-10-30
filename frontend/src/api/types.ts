@@ -81,3 +81,43 @@ export interface CatalogMeta {
   syncedAt: string;
   source: string;
 }
+export interface SourcedFact {
+  text: string;
+  source: string;
+}
+export interface CaseStudySummary {
+  id: string;
+  title: string;
+  date: string;
+}
+export interface CaseStudy extends CaseStudySummary {
+  facts: SourcedFact[];
+  aftermath: (SourcedFact & { date: string })[];
+  sources: { key: string; label: string; url: string }[];
+  conjunction: ConjunctionDetail | null;
+  reality: {
+    moverNoradId: number;
+    dvMs: number | null;
+    propellantKg: number;
+    massKg: number;
+    ispS: number;
+    basis: string;
+  } | null;
+  orbitSentinel: {
+    moverSide: 'a' | 'b';
+    moverNoradId: number;
+    moverMassKg: number;
+    maneuver: ManeuverOption;
+    criteria: { name: string; weight: number; a: number; b: number }[];
+    alternative: ManeuverOption | null;
+  } | null;
+  narrative: { reality: string; orbitSentinel: string; brief: string } | null;
+  comparison: {
+    propellantSavedKg: number;
+    propellantRatio: number;
+    dvRealityMs: number | null;
+    dvOrbitSentinelMs: number | null;
+  } | null;
+  assumptions: string[];
+  status: { physics: 'ready' | 'pending' | 'error'; ai: 'ready' | 'pending' | 'error' };
+}

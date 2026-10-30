@@ -6,3 +6,5 @@ export const useCatalogMeta = () => useQuery({ queryKey: ['catalog-meta'], query
 export const useConjunctions = () => useQuery({ queryKey: ['conjunctions'], queryFn: ({ signal }) => api.conjunctions(signal), staleTime: 60000, retry: 1 });
 export const useConjunction = (id: string | undefined) => useQuery({ queryKey: ['conjunction', id], queryFn: ({ signal }) => api.conjunction(id ?? '', signal), enabled: Boolean(id), staleTime: 60000, retry: 1 });
 export const useCascade = () => useMutation({ mutationFn: (request: CascadeRequest) => api.cascade(request) });
+export const useCaseStudies = () => useQuery({ queryKey: ['case-studies'], queryFn: ({ signal }) => api.caseStudies(signal), staleTime: Infinity, retry: 1 });
+export const useCaseStudy = (id: string | undefined) => useQuery({ queryKey: ['case-study', id], queryFn: ({ signal }) => api.caseStudy(id ?? '', signal), enabled: Boolean(id), staleTime: Infinity, retry: 1 });
