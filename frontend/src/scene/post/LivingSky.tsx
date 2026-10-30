@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { BufferAttribute, BufferGeometry } from 'three';
+import ShootingStars from './ShootingStars';
 
 const vertex = `
   attribute vec3 color;
@@ -71,7 +72,7 @@ export default function LivingSky({ quality }: { quality: 'high' | 'low' }) {
     uniforms.uTime.value = clock.elapsedTime;
     uniforms.uPixelRatio.value = Math.min(gl.getPixelRatio(), 1.75);
   });
-  return <points geometry={geometry} raycast={() => null}>
+  return <><points geometry={geometry} raycast={() => null}>
     <shaderMaterial vertexShader={vertex} fragmentShader={fragment} uniforms={uniforms} transparent depthWrite={false} toneMapped={false} />
-  </points>;
+  </points>{quality === 'high' && <ShootingStars />}</>;
 }
