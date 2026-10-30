@@ -132,7 +132,7 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [mode, navigate]);
-  const selectObject = (id: number) => {
+  const selectObject = (id: number | null) => {
     setSelectedId(id);
     setPalette(false);
   };
@@ -146,7 +146,7 @@ export default function App() {
     (c) => c.primary.maneuverable && c.secondary.maneuverable,
   )?.id;
   return (
-    <div className={`application mode-${mode} mobile-${mobilePanel}`}>
+    <div className={`application mode-${mode} mobile-${mobilePanel}${selectedId !== null ? ' has-selection' : ''}`}>
       <SimClockTicker />
       <a className="skip-link" href="#workspace">
         Skip to mission data
@@ -287,9 +287,12 @@ export default function App() {
             />
             {selected ? (
               <ObjectInspector
+                key={selected.noradId}
                 object={selected}
+                nextApproach={threats.data?.find(event => event.primary.noradId === selected.noradId || event.secondary.noradId === selected.noradId)}
                 onClose={() => setSelectedId(null)}
                 onFocus={() => setFocusNonce((v) => v + 1)}
+                onViewConjunctions={(id) => navigate(`/conjunctions/${id}`)}
               />
             ) : (
               <MissionThreats

@@ -1,11 +1,12 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Billboard, Html, Line } from '@react-three/drei';
-import { Group, Mesh, Vector3 } from 'three';
+import { AdditiveBlending, BufferGeometry, Group, Mesh, MeshBasicMaterial, Vector3 } from 'three';
 import { json2satrec, propagate, type OMMJsonObject } from 'satellite.js';
 import type { CatalogObject, Conjunction } from '../api/types';
 import { useSimStore } from '../sim/store';
-import type { PositionBuffers } from './ObjectCloud';
+import { readDisplayedPosition, type PositionBuffers } from './ObjectCloud';
+import SelectedModel from './SelectedModel';
 
 const EARTH_KM = 6378.137;
 export function objectPositionAt(object: CatalogObject, timeMs: number) {
@@ -37,77 +38,47 @@ export function orbitPoints(object: CatalogObject, timeMs: number) {
   return points;
 }
 
-function SatelliteModel() {
-  return (
-    <group scale={0.017} rotation={[0.2, 0, 0.45]}>
-      <mesh>
-        <boxGeometry args={[0.7, 0.8, 0.7]} />
-        <meshStandardMaterial color="#ff5d66" metalness={0.48} roughness={0.4} />
-      </mesh>
-      {[-1, 1].map((side) => (
-        <group key={side} position={[side * 1.3, 0, 0]}>
-          <mesh>
-            <boxGeometry args={[1.75, 0.035, 0.85]} />
-            <meshStandardMaterial color="#5b1e2a" metalness={0.65} roughness={0.23} />
-          </mesh>
-          {[0, 1, 2, 3, 4].map((cell) => (
-            <mesh key={cell} position={[-0.66 + cell * 0.33, 0.025, 0]}>
-              <boxGeometry args={[0.012, 0.012, 0.85]} />
-              <meshBasicMaterial color="#db8692" />
-            </mesh>
-          ))}
-        </group>
-      ))}
-      <mesh position={[0, 0.55, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <coneGeometry args={[0.4, 0.2, 24, 1, true]} />
-        <meshStandardMaterial color="#e7edf4" side={2} />
-      </mesh>
-    </group>
-  );
-}
-
 export function SelectedObject({
   object,
   index,
   buffers,
-  closeUp,
+  exiting,
 }: {
   object: CatalogObject;
   index: number;
   buffers: React.MutableRefObject<PositionBuffers>;
-  closeUp: boolean;
+  exiting: boolean;
 }) {
   const group = useRef<Group>(null);
   const ring = useRef<Mesh>(null);
   const reduced = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
   const points = useMemo(() => orbitPoints(object, useSimStore.getState().timeMs), [object]);
-  useFrame(({ clock }) => {
+  const trail = useMemo(() => {
+    const geometry = new BufferGeometry().setFromPoints(points);
+    geometry.setDrawRange(0, 0);
+    return geometry;
+  }, [points]);
+  const reveal = useRef(0);
+  useEffect(() => () => trail.dispose(), [trail]);
+  useFrame(({ clock }, delta) => {
+    reveal.current += (Number(!exiting) - reveal.current) * Math.min(1, delta * (reduced ? 24 : 3.5));
+    trail.setDrawRange(0, Math.max(0, Math.floor(points.length * reveal.current)));
     const positions = buffers.current.current;
     if (group.current && positions.length > index * 3 + 2)
-      group.current.position.set(
-        positions[index * 3],
-        positions[index * 3 + 1],
-        positions[index * 3 + 2],
-      );
-    if (ring.current && !reduced) ring.current.rotation.z = clock.elapsedTime * 0.12;
+      readDisplayedPosition(buffers.current, index, group.current.position);
+    if (ring.current) {
+      if (!reduced) ring.current.rotation.z = clock.elapsedTime * 0.12;
+      (ring.current.material as MeshBasicMaterial).opacity = reduced ? 0.72 : 0.66 + Math.sin(clock.elapsedTime * 2.8) * 0.18;
+    }
   });
   return (
     <>
-      {points.length > 1 && (
-        <Line
-          points={points}
-          color={
-            object.type === 'DEBRIS' ? '#ff8a3d' : object.type === 'PAYLOAD' ? '#ff5d66' : '#b7c0d1'
-          }
-          transparent
-          opacity={0.68}
-          lineWidth={1.2}
-        />
-      )}
+      {points.length > 1 && <line geometry={trail}><lineBasicMaterial color={object.type === 'DEBRIS' ? '#ff8a3d' : object.type === 'PAYLOAD' ? '#ff5d66' : '#b7c0d1'} transparent opacity={0.7} depthWrite={false} /></line>}
       <group ref={group}>
         <Billboard>
+          <mesh><circleGeometry args={[0.19, 48]} /><meshBasicMaterial color={object.type === 'DEBRIS' ? '#ff8a3d' : object.type === 'PAYLOAD' ? '#ff5d66' : '#b7c0d1'} transparent opacity={0.055} depthTest={false} depthWrite={false} blending={AdditiveBlending} /></mesh>
           <mesh ref={ring}>
-            <ringGeometry args={[0.022, 0.025, 40]} />
+            <ringGeometry args={[0.16, 0.165, 64]} />
             <meshBasicMaterial
               color={
                 object.type === 'PAYLOAD'
@@ -117,12 +88,12 @@ export function SelectedObject({
                     : '#b7c0d1'
               }
               transparent
-              opacity={0.95}
+              opacity={0.8}
               depthTest={false}
             />
           </mesh>
           <mesh>
-            <circleGeometry args={[0.007, 20]} />
+            <circleGeometry args={[0.012, 20]} />
             <meshBasicMaterial
               color={
                 object.type === 'PAYLOAD'
@@ -135,7 +106,8 @@ export function SelectedObject({
             />
           </mesh>
         </Billboard>
-        {closeUp && object.type === 'PAYLOAD' && <SatelliteModel />}
+        <SelectedModel object={object} exiting={exiting} reduced={reduced} />
+        <pointLight color={object.type === 'DEBRIS' ? '#ff8a3d' : object.type === 'PAYLOAD' ? '#ff5d66' : '#b7c0d1'} intensity={0.18} distance={0.65} />
         <Html
           position={[0.07, 0.06, 0]}
           style={{ pointerEvents: 'none', whiteSpace: 'nowrap' }}
