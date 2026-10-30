@@ -218,7 +218,7 @@ def record_from_catalog(value: Any) -> CatalogRecord:
     fields["EPOCH"] = epoch.strftime("%Y-%m-%dT%H:%M:%S.%f")
     fields["NORAD_CAT_ID"] = number if number <= 339999 else 0
     # Non-dynamic metadata defaults permit the compact frontend GP shape.
-    for key, default in (("CLASSIFICATION_TYPE", "U"), ("EPHEMERIS_TYPE", 0),
+    for key, default in (("OBJECT_ID", ""), ("CLASSIFICATION_TYPE", "U"), ("EPHEMERIS_TYPE", 0),
                          ("ELEMENT_SET_NO", 0), ("REV_AT_EPOCH", 0)):
         fields.setdefault(key, default)
     satellite = Satrec()

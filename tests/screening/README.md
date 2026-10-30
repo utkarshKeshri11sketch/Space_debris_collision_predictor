@@ -136,3 +136,7 @@ Tests use synthetic OMM fixtures, analytic Gaussian probabilities, and the
 published SGP4 ISS reference example. They never fetch CelesTrak data or
 consume AWS credits. Comparison against a timestamp-matched SOCRATES report
 and a 30k-object Lambda runtime measurement still require integration data.
+
+Verified locally: 46 tests passed using Python 3.14.3, NumPy 2.5.4,
+sgp4 2.27 (accelerated wheel), and pytest 9.2.0. Python 3.11 syntax parsing
+passed; execution on the intended Python 3.11 Lambda runtime is still pending.
