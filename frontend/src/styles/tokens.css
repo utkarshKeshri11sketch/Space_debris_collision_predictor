@@ -1,0 +1,24 @@
+:root {
+  --bg-void: #05070d;
+  --bg-base: #0b0f17;
+  --surface-1: #0e1320;
+  --surface-2: #121826;
+  --surface-3: #1a2234;
+  --line: #1e2638;
+  --line-strong: #2a3550;
+  --text-1: #e6eaf2;
+  --text-2: #a9b3c6;
+  --text-3: #8a94a8;
+  --accent: #4cc9f0;
+  --sat: #ff5d66;
+  --debris: #ff8a3d;
+  --rocket: #b7c0d1;
+  --risk-critical: #ff5d5d;
+  --risk-high: #f2c14e;
+  --risk-watch: #8cc4ff;
+  --ok: #3ddc97;
+  --font-display: 'Archivo', sans-serif;
+  --font-body: 'IBM Plex Sans', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  color-scheme: dark;
+}

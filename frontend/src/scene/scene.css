@@ -1,0 +1,17 @@
+.orbital-scene { position: absolute; inset: 0; z-index: 0; overflow: hidden; background: #05070d; }
+.orbital-scene canvas { touch-action: none; outline: none; }
+.scene-vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 45%, transparent 32%, rgba(5, 7, 13, 0.13) 68%, rgba(5, 7, 13, 0.65) 100%); }
+.scene-object-label { padding: 8px 11px; border: 1px solid #30353d; border-left: 2px solid #ff5d66; border-radius: 2px; background: #11151a; color: #e6eaf2; font: 500 12px 'IBM Plex Sans', sans-serif; line-height: 1.35; letter-spacing: 0; box-shadow: 0 4px 12px #0004; }
+.scene-object-label small { display: block; margin-top: 4px; color: #a0a9b7; font: 10px 'IBM Plex Mono', monospace; }
+.scene-encounter-label { padding: 11px 13px; border: 1px solid #30353d; border-left: 2px solid #ff5d66; border-radius: 2px; background: #11151a; color: #e6eaf2; white-space: nowrap; box-shadow: 0 4px 12px #0004; }
+.scene-encounter-label span { display: block; color: #a9b3c6; font: 10px 'IBM Plex Sans', sans-serif; letter-spacing: 0.01em; text-transform: lowercase; }
+.scene-encounter-label span::first-letter { text-transform: uppercase; }
+.scene-encounter-label strong { display: block; margin: 6px 0; color: #ff5d66; font: 24px 'IBM Plex Mono', monospace; line-height: 1.1; }
+.scene-encounter-label small { color: #a0a9b7; font: 10px 'IBM Plex Sans', sans-serif; }
+.scene-worker-notice { position: absolute; bottom: 124px; left: 50%; transform: translateX(-50%); padding: 7px 11px; border: 1px solid #3b3a32; border-radius: 2px; background: #171819; color: #d6b466; font: 11px 'IBM Plex Sans', sans-serif; white-space: nowrap; }
+.scene-fallback { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #a9b3c6; font-size: 13px; }
+.scene-fallback > div { width: 280px; height: 280px; margin-bottom: 8px; border: 1px solid #284d64; border-radius: 50%; background: radial-gradient(circle at 30% 20%, #164563, #0a192b 45%, #05070d 76%); box-shadow: 1px 0 9px #4cc9f055; }
+.scene-fallback small { color: #8a94a8; }
+.scene-stats { position: absolute !important; top: 88px !important; left: 280px !important; }
+.scene-diagnostics { position: absolute; top: 138px; left: 280px; padding: 6px 8px; border: 1px solid #30353d; border-radius: 2px; background: #11151a; color: #a9b3c6; font: 10px 'IBM Plex Mono', monospace; }
+@media (max-width: 767px) { .scene-worker-notice { top: 90px; bottom: auto; font-size: 10px; } .scene-object-label { font-size: 11px; } }

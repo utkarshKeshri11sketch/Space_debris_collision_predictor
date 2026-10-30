@@ -1,0 +1,65 @@
+import { delay, http, HttpResponse } from 'msw';
+import type { CascadeRequest } from './types';
+import { getMockCatalog, getMockMeta, mockConjunctions, getMockCascade, negotiationEvents, sentinelBrief } from './mockData';
+const negotiatedEvents = new Map<string, string>();
+const encoder = new TextEncoder();
+function eventResponse(events: unknown[], intervalMs: number) {
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      for (let index = 0; index < events.length; index++) {
+        await delay(index === 0 ? 200 : intervalMs + (index % 3) * 190);
+        if (cancelled) return;
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(events[index])}\n\n`));
+      }
+      if (!cancelled) { controller.enqueue(encoder.encode('data: [DONE]\n\n')); controller.close(); }
+    },
+    cancel() { cancelled = true; },
+  });
+  return new HttpResponse(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' } });
+}
+export const handlers = [
+  http.get('*/api/catalog', async () => { await delay(200); return HttpResponse.json(getMockCatalog()); }),
+  http.get('*/api/catalog/meta', () => HttpResponse.json(getMockMeta())),
+  http.get('*/api/conjunctions', async ({ request }) => {
+    await delay(250);
+    const url = new URL(request.url);
+    const days = Math.max(0, Math.min(7, Number(url.searchParams.get('days') ?? 7)));
+    const minPc = Number(url.searchParams.get('minPc') ?? 1e-6);
+    return HttpResponse.json(mockConjunctions.filter((event) => event.pc >= minPc && Date.parse(event.tca) <= Date.now() + days * 86400000));
+  }),
+  http.get('*/api/conjunctions/:id', async ({ params }) => {
+    await delay(200);
+    const event = mockConjunctions.find((item) => item.id === params.id);
+    return event ? HttpResponse.json(event) : HttpResponse.json({ message: 'Conjunction not found in this screening run.' }, { status: 404 });
+  }),
+  http.post('*/api/negotiations', async ({ request }) => {
+    const body = await request.json() as { conjunctionId?: string };
+    const event = mockConjunctions.find((item) => item.id === body.conjunctionId);
+    if (!event) return HttpResponse.json({ message: 'Conjunction not found.' }, { status: 404 });
+    if (!event.primary.maneuverable || !event.secondary.maneuverable) return HttpResponse.json({ message: 'Negotiation requires two maneuverable spacecraft.' }, { status: 422 });
+    const negotiationId = crypto.randomUUID();
+    negotiatedEvents.set(negotiationId, event.id);
+    return HttpResponse.json({ negotiationId }, { status: 201 });
+  }),
+  http.get('*/api/negotiations/:id/stream', ({ params }) => {
+    const id = String(params.id);
+    const conjunctionId = negotiatedEvents.get(id);
+    if (!conjunctionId) return HttpResponse.json({ message: 'Negotiation expired. Start a new session.' }, { status: 404 });
+    return eventResponse(negotiationEvents(conjunctionId), 1350);
+  }),
+  http.post('*/api/cascade', async ({ request }) => {
+    await delay(1000);
+    const body = await request.json() as CascadeRequest;
+    if (!Number.isFinite(body.noradId) || !Number.isFinite(body.years) || !['collision', 'explosion'].includes(body.event)) return HttpResponse.json({ message: 'Choose a catalog object, event type and duration.' }, { status: 400 });
+    try { return HttpResponse.json(getMockCascade(body)); }
+    catch (error) { return HttpResponse.json({ message: error instanceof Error ? error.message : 'Cascade failed.' }, { status: 404 }); }
+  }),
+  http.post('*/api/ask', async ({ request }) => {
+    const body = await request.json() as { question?: string };
+    if (!body.question?.trim()) return HttpResponse.json({ message: 'Enter a question about this screening run.' }, { status: 400 });
+    const question = body.question.toLowerCase();
+    const answer = question.includes('iss') || question.includes('safe') ? 'In this sample screening, the ISS has one critical conjunction: a COSMOS 1408 fragment at 412 m, with collision probability 3.1 × 10⁻⁴. Review the 0.42 m/s prograde option, which increases modeled separation to 4.2 km. A human operator must approve any maneuver.' : question.includes('cascade') || question.includes('debris') ? 'The Cascade Lab models a breakup as seeded fragments spreading along the parent orbit. The 25-year sample includes two secondary collisions. This is an approximate visual model, not a forecast of actual collisions. Select SL-16 R/B and run a collision scenario to explore it.' : question.includes('negot') ? 'STARLINK-31502 and ONEWEB-0461 can both maneuver. Their sample negotiation compares fuel efficiency, mission continuity, operator readiness and risk reduction. Start the session in Negotiator; the agreement remains pending human flight approval.' : sentinelBrief;
+    return eventResponse(answer.match(/\S+\s*/g)?.map((text) => ({ type: 'token', text })) ?? [], 20);
+  }),
+];
