@@ -18,6 +18,8 @@ from app.physics.screening import (
     rtn_basis,
     screen_catalog,
     state_at,
+    bands_overlap,
+    assumed_uncertainty,
 )
 
 EPOCH = datetime(2026, 10, 30, tzinfo=timezone.utc)
@@ -324,9 +326,10 @@ def test_slow_coorbital_event_is_flagged_not_given_fake_zero_probability():
     assert any("too low" in issue.message for issue in run.issues)
 
 
-def test_explicit_uncertainty_is_required_and_provider_failures_propagate():
-    with pytest.raises(TypeError, match="risk_model"):
-        screen_catalog(crossing_catalog(), 25544)
+def test_default_uncertainty_is_labeled_and_provider_failures_propagate():
+    run = screen_catalog(crossing_catalog(), 25544, start=EPOCH, days=120 / DAY, min_pc=0)
+    assert run.encounters[0].uncertainty.illustrative
+    assert "ASSUMED" in run.encounters[0].as_detail()["brief"]
 
     def no_data(*args):
         raise RuntimeError("No TCA covariance supplied")
@@ -346,3 +349,45 @@ def test_naive_request_time_is_rejected():
     with pytest.raises(ScreeningError, match="UTC offset"):
         screen_catalog(crossing_catalog(), 25544, start=datetime(2026, 10, 30),
                        risk_model=illustrative_model)
+
+
+def test_radial_band_filter_keeps_overlap_and_rejects_disjoint_orbits():
+    target = record_from_catalog(object_fixture(25544))
+    close = record_from_catalog(object_fixture(123, radius_km=7008))
+    above = record_from_catalog(object_fixture(124, radius_km=7020))
+    below = record_from_catalog(object_fixture(125, radius_km=6980))
+    assert bands_overlap(target, close)
+    assert not bands_overlap(target, close, margin_km=0)
+    assert not bands_overlap(target, above)
+    assert not bands_overlap(target, below)
+    catalog = crossing_catalog() + [above.catalog, below.catalog]
+    run = screen(catalog)
+    assert run.statistics["catalogObjects"] == 4
+    assert run.statistics["bandCandidates"] == 1
+    assert len(run.encounters) == 1
+
+
+def test_per_type_profiles_are_explicit_and_secondary_type_changes_covariance():
+    primary, secondary = crossing_catalog()
+    payload = assumed_uncertainty(primary, secondary, EPOCH)
+    secondary["type"] = "DEBRIS"
+    debris = assumed_uncertainty(primary, secondary, EPOCH)
+    assert payload.illustrative and debris.illustrative
+    assert payload.hard_body_radius_m == 63  # ASSUMED 58 m ISS + 5 m payload.
+    assert debris.hard_body_radius_m == 59  # ASSUMED 58 m ISS + 1 m debris.
+    assert debris.secondary_covariance_rtn_m2[1, 1] == 1000**2
+    assert debris.secondary_covariance_rtn_m2[1, 1] > payload.secondary_covariance_rtn_m2[1, 1]
+
+
+def test_encounter_exposes_device4_exact_state_protocol():
+    event = screen().encounters[0]
+    np.testing.assert_array_equal(event.r_primary_km, event.primary_position_km)
+    np.testing.assert_array_equal(event.v_primary_kms, event.primary_velocity_km_s)
+    np.testing.assert_array_equal(event.r_secondary_km, event.secondary_position_km)
+    np.testing.assert_array_equal(event.v_secondary_kms, event.secondary_velocity_km_s)
+    assert event.sigma_major_m == event.covariance["sigmaMajorM"]
+    assert event.sigma_minor_m == event.covariance["sigmaMinorM"]
+    assert event.angle_deg == event.covariance["angleDeg"]
+    assert event.hard_body_radius_m == event.uncertainty.hard_body_radius_m
+    assert event.primary_norad_id == 25544 and event.secondary_norad_id == 123456789
+    assert event.range_t_sec[0] == -60 and event.range_t_sec[-1] == 60

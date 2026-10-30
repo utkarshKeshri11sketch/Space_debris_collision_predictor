@@ -1,10 +1,10 @@
-"""Selected-object SGP4 screening; no downloads, API routes, or synthetic events.
+"""Selected-object SGP4 screening; no downloads or synthetic conjunctions.
 
 Contract: frontend/src/api/types.ts. TEME states are km and km/s internally;
 public distances/covariances are m/m^2. Call ``screen_catalog`` on a cached
-CatalogObject sequence, supplying an explicit ``risk_model`` at each TCA.
-Public GP elements contain neither covariance nor hard-body size, so this
-module deliberately has no default Pc model. See tests/screening/README.md.
+CatalogObject sequence. Public GP has no covariance or dimensions: the
+default risk model is explicitly ASSUMED by object type, not measured.
+Override ``risk_model`` with TCA covariance/size inputs when available.
 
 Physics assumptions: Earth-centred UTC/TEME SGP4 with WGS72; independent
 Gaussian position errors specified in each object's RTN frame *at TCA*;
@@ -16,12 +16,20 @@ are assumed. The broad-phase acceleration bound is explicit in settings.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 import hashlib
 import json
 import math
+import logging
+import os
+from pathlib import Path
+from collections import OrderedDict
+from contextvars import ContextVar
+import re
+from threading import RLock
+from time import perf_counter, monotonic
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -51,6 +59,10 @@ def _positive(value: float, name: str, *, zero: bool = False) -> None:
 class ScreeningConfig:
     # Demo search envelope, NOT an operational safety threshold.
     max_miss_distance_m: float = 10000.0
+    # Static radial-band prefilter requested for the hackathon. Margin is
+    # applied to the target band once, not independently to both objects.
+    # This assumes no drag/maneuver changes exceeding the 10 km allowance.
+    orbital_band_margin_km: float = 10.0
     step_seconds: float = 60.0
     time_chunk_intervals: int = 128
     satellite_batch_size: int = 128
@@ -73,6 +85,7 @@ class ScreeningConfig:
                      "max_relative_acceleration_km_s2", "max_epoch_age_days",
                      "minimum_relative_speed_km_s"):
             _positive(getattr(self, name), name)
+        _positive(self.orbital_band_margin_km, "orbital_band_margin_km", zero=True)
         if not 0 < self.high_pc < self.critical_pc <= 1:
             raise ScreeningError("require 0 < high_pc < critical_pc <= 1")
         if self.step_seconds > 60 or self.tca_tolerance_seconds >= self.step_seconds:
@@ -112,6 +125,38 @@ class EncounterUncertainty:
 
 
 RiskModel = Callable[[Mapping[str, Any], Mapping[str, Any], datetime], EncounterUncertainty]
+
+
+# Demo assumptions only: per-object 1-sigma (R,T,N) position errors at TCA
+# in metres, and bounding radius in metres. These are NOT catalog accuracy
+# estimates or operator dimensions. Along-track is deliberately larger.
+# No covariance growth law is claimed. Callers can supply real TCA inputs.
+ASSUMED_PROFILES: dict[str, tuple[tuple[float, float, float], float]] = {
+    "PAYLOAD": ((100.0, 300.0, 100.0), 5.0),
+    "DEBRIS": ((300.0, 1000.0, 300.0), 1.0),
+    "ROCKET_BODY": ((200.0, 600.0, 200.0), 5.0),
+    "UNKNOWN": ((500.0, 1500.0, 500.0), 5.0),
+}
+
+
+def assumed_uncertainty(primary: Mapping[str, Any], secondary: Mapping[str, Any],
+                        tca: datetime) -> EncounterUncertainty:
+    """Explicit object-type covariance/size assumptions for the default demo.
+
+    ISS radius 58 m is an illustrative enclosing-radius assumption consistent
+    with the frontend fixture, not a measured collision cross section.
+    """
+    covariances, radii, notes = [], [], []
+    for entry in (primary, secondary):
+        kind = str(entry.get("type", "UNKNOWN"))
+        sigmas, radius = ASSUMED_PROFILES.get(kind, ASSUMED_PROFILES["UNKNOWN"])
+        if entry.get("noradId") == 25544:
+            radius = 58.0
+        covariances.append(np.diag(np.square(sigmas)))
+        radii.append(radius)
+        notes.append(f"NORAD {entry.get('noradId')} {kind}: RTN sigma {sigmas} m, radius {radius:g} m")
+    return EncounterUncertainty(covariances[0], covariances[1], sum(radii),
+                                "ASSUMED per-type inputs; " + "; ".join(notes), True)
 
 
 def _covariance(value: ArrayLike, size: int) -> FloatArray:
@@ -174,6 +219,23 @@ class CatalogRecord:
 
     def object_ref(self) -> dict[str, Any]:
         return {key: self.catalog[key] for key in ("noradId", "name", "type", "maneuverable")}
+
+
+def orbital_band_km(record: CatalogRecord) -> tuple[float, float]:
+    """Mean perigee/apogee geocentric radii from WGS72 SGP4 mean elements.
+
+    ``Satrec.a`` is the recovered semimajor axis in Earth radii. This is a
+    coarse orbital envelope, not a forecast of osculating extrema or decay.
+    """
+    radius = record.satellite.a * record.satellite.radiusearthkm
+    return radius * (1 - record.satellite.ecco), radius * (1 + record.satellite.ecco)
+
+
+def bands_overlap(primary: CatalogRecord, secondary: CatalogRecord, margin_km: float = 10) -> bool:
+    _positive(margin_km, "margin_km", zero=True)
+    p_lo, p_hi = orbital_band_km(primary)
+    s_lo, s_hi = orbital_band_km(secondary)
+    return s_lo <= p_hi + margin_km and s_hi >= p_lo - margin_km
 
 
 def record_from_catalog(value: Any) -> CatalogRecord:
@@ -432,6 +494,7 @@ class ScreeningRun:
     end: datetime
     encounters: tuple[Encounter, ...]
     issues: tuple[ScreeningIssue, ...] = ()
+    statistics: dict[str, float | int] = field(default_factory=dict)
 
     @property
     def complete(self) -> bool:
@@ -479,7 +542,10 @@ def _encounter(primary: CatalogRecord, secondary: CatalogRecord, at: datetime,
     # Full orbital fields bind IDs to a catalog snapshot, not mutable globals.
     identity = json.dumps([primary.catalog["omm"], secondary.catalog["omm"], _iso(at)],
                           sort_keys=True, separators=(",", ":"))
-    identifier = f"{primary.norad_id}-{secondary.norad_id}-{hashlib.sha256(identity.encode()).hexdigest()[:20]}"
+    # Encode TCA so another Lambda container can reconstruct a detail from
+    # the same catalog snapshot; the digest binds time/pair/orbital elements.
+    identifier = (f"{primary.norad_id}-{secondary.norad_id}-{at.strftime('%Y%m%dT%H%M%S%fZ')}-"
+                  f"{hashlib.sha256(identity.encode()).hexdigest()[:20]}")
     return Encounter(primary, secondary, at, pr, pv, sr, sv, uncertainty,
                      {"sigmaMajorM": float(math.sqrt(eigenvalues[1])),
                       "sigmaMinorM": float(math.sqrt(eigenvalues[0])),
@@ -523,7 +589,7 @@ def _refine(primary: CatalogRecord, secondary: CatalogRecord, start: datetime,
     return roots
 
 
-def screen_catalog(catalog: Sequence[Any], primary_norad_id: int, *, risk_model: RiskModel,
+def screen_catalog(catalog: Sequence[Any], primary_norad_id: int, *, risk_model: RiskModel = assumed_uncertainty,
                    start: datetime | str | None = None, days: float = 7,
                    min_pc: float = 1e-6, config: ScreeningConfig | None = None) -> ScreeningRun:
     """Screen one selected object against a cached catalog over 0..7 days.
@@ -539,6 +605,7 @@ def screen_catalog(catalog: Sequence[Any], primary_norad_id: int, *, risk_model:
     Secondary failures are returned as issues, never turned into zero Pc.
     Invalid primary states or duplicate catalog identities fail the whole run.
     """
+    started = perf_counter()
     config = config or ScreeningConfig()
     primary_norad_id = _catalog_id(primary_norad_id)
     _positive(days, "days", zero=True)
@@ -575,7 +642,8 @@ def screen_catalog(catalog: Sequence[Any], primary_norad_id: int, *, risk_model:
     # Match the mock days=0 behaviour (empty horizon), while validating input.
     if days == 0:
         return ScreeningRun(primary_norad_id, begin, end, (), tuple(issues.values()))
-    secondaries = [record for record in records if record is not primary]
+    secondaries = [record for record in records if record is not primary
+                   and bands_overlap(primary, record, config.orbital_band_margin_km)]
     duration = days * DAY_S
     times = np.arange(0.0, duration, config.step_seconds)
     times = np.append(times, duration)
@@ -635,24 +703,174 @@ def screen_catalog(catalog: Sequence[Any], primary_norad_id: int, *, risk_model:
                 except ScreeningError as exc:
                     issues[secondary.norad_id, "encounter"] = ScreeningIssue(secondary.norad_id, "encounter", str(exc))
     results.sort(key=lambda event: (-event.pc, event.tca, event.secondary.norad_id))
-    return ScreeningRun(primary_norad_id, begin, end, tuple(results), tuple(issues.values()))
+    return ScreeningRun(primary_norad_id, begin, end, tuple(results), tuple(issues.values()),
+                        {"catalogObjects": len(catalog), "validObjects": len(records),
+                         "bandCandidates": len(secondaries),
+                         "elapsedSeconds": perf_counter() - started})
 
 
-# Public API hooks: these signatures replace Lead's stubs unchanged. The
-# catalog engine above is usable independently of FastAPI/shared models.
+# Public API hooks: Lead's signatures are preserved. Data owns remote I/O.
+_LOG = logging.getLogger(__name__)
+_API_LOCK = RLock()
+_RUN_CACHE: OrderedDict[tuple[str, int, float], tuple[float, ScreeningRun, str]] = OrderedDict()
+_DETAIL_CACHE: OrderedDict[str, tuple[float, Encounter, str]] = OrderedDict()
+_STATUS: ContextVar[dict[str, Any]] = ContextVar("screening_status", default={})
+_ID_PATTERN = re.compile(r"^(\d{1,9})-(\d{1,9})-(\d{8}T\d{12}Z)-[0-9a-f]{20}$")
+
+
+def catalog_objects_from_omm(records: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Adapt a raw GP snapshot for offline validation/local demo override.
+
+    OMM alone does not establish operational status or maneuverability.
+    Classify debris/rocket bodies by supplied OBJECT_TYPE or name; other
+    objects are UNKNOWN/nonmaneuverable unless metadata says otherwise.
+    ISS is the only explicit known active-payload exception here. Data's
+    normal CatalogObject snapshot carries its own operational metadata.
+    """
+    catalog = []
+    for raw in records:
+        if "omm" in raw:
+            catalog.append(dict(raw))
+            continue
+        number = _catalog_id(raw.get("NORAD_CAT_ID"))
+        name = str(raw.get("OBJECT_NAME") or f"NORAD {number}")
+        kind = str(raw.get("OBJECT_TYPE", "UNKNOWN")).upper().replace(" ", "_")
+        if kind not in OBJECT_TYPES:
+            kind = "UNKNOWN"
+        if kind == "UNKNOWN":
+            if " DEB" in name.upper():
+                kind = "DEBRIS"
+            elif "R/B" in name.upper():
+                kind = "ROCKET_BODY"
+        active = number == 25544
+        if active:
+            kind = "PAYLOAD"
+        catalog.append({"noradId": number, "name": name, "type": kind,
+                        "active": active, "maneuverable": active, "omm": dict(raw)})
+    return catalog
+
+
+def _snapshot() -> tuple[list[dict[str, Any]], str, str]:
+    # Optional local snapshot override permits a real ISS demo before Data
+    # is integrated. No fallback to synthetic data on a failed file/read.
+    override = os.getenv("SCREENING_CATALOG_PATH")
+    if override:
+        payload = json.loads(Path(override).read_text(encoding="utf-8-sig"))
+        entries = payload.get("catalog", payload.get("objects")) if isinstance(payload, dict) else payload
+        if not isinstance(entries, list):
+            raise ScreeningError("snapshot must contain an OMM or CatalogObject array")
+        catalog = catalog_objects_from_omm(entries)
+        source = str(payload.get("source", "Local cached GP snapshot")) if isinstance(payload, dict) else "Local cached GP snapshot"
+    else:
+        from ..data.catalog import load_catalog, catalog_meta
+        catalog = [_mapping(entry) for entry in load_catalog()]
+        source = str(catalog_meta().source)
+    fingerprint = hashlib.sha256(json.dumps(catalog, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return catalog, source, fingerprint
+
+
+def screening_status() -> dict[str, Any]:
+    """Request-local diagnostics for router headers/logging, outside JSON schema."""
+    return dict(_STATUS.get())
+
+
+def _remember(encounter: Encounter, source: str) -> None:
+    _DETAIL_CACHE[encounter.id] = monotonic(), encounter, source
+    _DETAIL_CACHE.move_to_end(encounter.id)
+    while len(_DETAIL_CACHE) > 512:
+        _DETAIL_CACHE.popitem(last=False)
+
+
+def _detail_model(encounter: Encounter, source: str) -> ConjunctionDetail:
+    from ..models import ConjunctionDetail
+    from . import maneuver
+    event = encounter.as_conjunction()
+    brief = (f"SGP4 predicts {encounter.primary_name} and {encounter.secondary_name} "
+             f"at {event['missDistanceM']:.1f} m separation at {event['tca']}, "
+             f"relative speed {event['relSpeedKms']:.3f} km/s. Catalog source: {source}.")
+    detail = encounter.as_detail(brief=brief)
+    if hasattr(maneuver, "plan_for_detail"):
+        plan = maneuver.plan_for_detail(detail, encounter=encounter,
+                                        primary_omm=encounter.primary.catalog["omm"], now=datetime.now(UTC))
+        detail.update(plan.to_contract())
+        if plan.notes:
+            detail["brief"] += " " + " ".join(plan.notes)
+    else:
+        # A truthful no-action baseline until Physics is integrated; never
+        # copy a synthetic burn onto a real event. High risk is not endorsed.
+        detail["options"] = [{"id": "no-action", "label": "No action", "direction": "none",
+                              "dvMs": 0, "burnAt": None, "newMissM": event["missDistanceM"],
+                              "newPc": event["pc"], "propellantKg": 0,
+                              "recommended": encounter.risk == "watch"}]
+    return ConjunctionDetail.model_validate(detail)
+
+
 def screen(target_id: int | None = None, days: float = 7,
            min_pc: float = 1e-6) -> list[ConjunctionDetail]:
-    """Return computed details in TCA order; None uses the protected watch-list.
+    """Computed details in TCA order; None uses SCREENING_TARGET_IDS (ISS).
 
-    Input is supplied by Data's load_catalog(). API integration and caching
-    are being implemented next; no mock conjunctions will be substituted.
+    Runs are cached 15 minutes against a full catalog fingerprint, target and
+    horizon. Forecast windows are anchored at run issue time. Pc filtering
+    never reruns propagation. No synthetic conjunctions are substituted.
     """
-    raise NotImplementedError("screening API cache integration is in progress")
+    from fastapi import HTTPException
+    try:
+        _positive(days, "days", zero=True)
+        if days > 7 or not math.isfinite(min_pc) or not 0 <= min_pc <= 1:
+            raise ScreeningError("days must be 0..7 and minPc must be 0..1")
+        targets = ([_catalog_id(target_id)] if target_id is not None else
+                   [_catalog_id(part.strip()) for part in os.getenv("SCREENING_TARGET_IDS", "25544").split(",")])
+        if days == 0:
+            _STATUS.set({"complete": True, "issues": 0, "source": "No screening horizon"})
+            return []
+        with _API_LOCK:
+            catalog, source, fingerprint = _snapshot()
+            available = {entry["noradId"] for entry in catalog}
+            missing = set(targets) - available
+            if missing:
+                raise HTTPException(404, f"Target not in catalog: {sorted(missing)}")
+            selected: dict[str, Encounter] = {}
+            issue_count, as_of = 0, []
+            for target in dict.fromkeys(targets):
+                key = fingerprint, target, float(days)
+                cached = _RUN_CACHE.get(key)
+                if cached is None or monotonic() - cached[0] >= 900:
+                    run = screen_catalog(catalog, target, days=days, min_pc=0)
+                    _RUN_CACHE[key] = monotonic(), run, source
+                    _RUN_CACHE.move_to_end(key)
+                    while len(_RUN_CACHE) > 8:
+                        _RUN_CACHE.popitem(last=False)
+                    if run.issues:
+                        _LOG.warning("Incomplete screening target=%s issues=%s", target, len(run.issues))
+                else:
+                    run = cached[1]
+                issue_count += len(run.issues)
+                as_of.append(_iso(run.start))
+                now = datetime.now(UTC)
+                for encounter in run.encounters:
+                    if encounter.pc >= min_pc and encounter.tca >= now:
+                        selected[encounter.id] = encounter
+                        _remember(encounter, source)
+            _STATUS.set({"complete": issue_count == 0, "issues": issue_count,
+                         "source": source, "asOf": min(as_of)})
+            return [_detail_model(event, source) for event in sorted(selected.values(), key=lambda e: (e.tca, -e.pc))]
+    except HTTPException:
+        raise
+    except ScreeningError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except (OSError, ValueError, TypeError) as exc:
+        _LOG.exception("Screening snapshot unavailable")
+        raise HTTPException(503, "Screening snapshot unavailable; check the cached catalog.") from exc
 
 
 def get_conjunction(conjunction_id: str) -> ConjunctionDetail | None:
     """Resolve a detail from a retained screening snapshot; unknown -> None."""
-    raise NotImplementedError("screening API cache integration is in progress")
+    with _API_LOCK:
+        encounter = get_encounter(conjunction_id)
+        if encounter is None:
+            return None
+        source = _DETAIL_CACHE[conjunction_id][2]
+        return _detail_model(encounter, source)
 
 
 def get_encounter(conjunction_id: str) -> Encounter | None:
@@ -663,4 +881,28 @@ def get_encounter(conjunction_id: str) -> Encounter | None:
     sigma_major_m, sigma_minor_m, angle_deg, hard_body_radius_m,
     primary_norad_id/name, secondary_norad_id/name, and range_t_sec.
     """
-    raise NotImplementedError("screening API cache integration is in progress")
+    with _API_LOCK:
+        cached = _DETAIL_CACHE.get(conjunction_id)
+        if cached is not None and monotonic() - cached[0] < 7200:
+            return cached[1]
+        # Cold Lambda reconstruction: validate the opaque ID against exactly
+        # the same GP snapshot. Unknown/old-snapshot IDs remain 404, not mocks.
+        match = _ID_PATTERN.fullmatch(conjunction_id)
+        if match is None:
+            return None
+        try:
+            at = datetime.strptime(match[3], "%Y%m%dT%H%M%S%fZ").replace(tzinfo=UTC)
+            now = datetime.now(UTC)
+            if not now - timedelta(hours=2) <= at <= now + timedelta(days=7):
+                return None
+            catalog, source, _ = _snapshot()
+            indexed = {entry["noradId"]: entry for entry in catalog}
+            primary = record_from_catalog(indexed[int(match[1])])
+            secondary = record_from_catalog(indexed[int(match[2])])
+            encounter = _encounter(primary, secondary, at, assumed_uncertainty, ScreeningConfig())
+            if encounter.id != conjunction_id:
+                return None
+            _remember(encounter, source)
+            return encounter
+        except (OSError, ValueError, TypeError, KeyError):
+            return None
