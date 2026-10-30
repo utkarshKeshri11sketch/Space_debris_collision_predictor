@@ -16,3 +16,9 @@ coverage/
 .DS_Store
 Thumbs.db
 .openai/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
