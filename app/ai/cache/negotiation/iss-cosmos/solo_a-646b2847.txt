@@ -1,0 +1,1 @@
+We will perform a prograde burn of 0.42 m/s using 0.18 kg propellant about six hours before closest approach; this will increase the miss distance to roughly 4.2 km and reduce collision probability to 2.3 × 10⁻⁸, well below the 1 × 10⁻⁵ threshold.

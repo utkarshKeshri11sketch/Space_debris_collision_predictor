@@ -1,0 +1,1 @@
+Waiting six hours leaves the burn window still open, giving six hours left to execute the recommended maneuver and twelve hours until closest approach. The screening run does not model any cost of a delayed burn, so only the timing changes; the risk and maneuver options remain as listed.
