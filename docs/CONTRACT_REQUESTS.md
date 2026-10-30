@@ -18,6 +18,39 @@ if accepted, updates `backend/app/models.py`. Never edit `models.py` or the fron
 
 ## Open
 
+### Case studies: Physics part delivered (`physics/incident.analyse`)
+- From: Physics (be-physics)
+- To: Lead, AI
+- Date: 2026-10-31
+- Request: none blocking. FYI for assembly and the presentation:
+  - `GET /api/case-studies/<id>` now reports `status.physics: "ready"` for both cases. `GET /api/conjunctions/<id>`
+    serves the reconstructed `ConjunctionDetail` (options = station burns + "No action", `afterSeries` set).
+  - **Reconstruction, not history:** circular orbits from the published altitudes/inclinations, the crossing with
+    the median relative speed over all relative RAANs (about 8.0 km/s), assumed R/T/N covariances (x3 for
+    the continuously maneuvering Starlink-2305), HBR 35 m, and TCA at 12:00 UTC. The miss is placed on the
+    covariance major axis where Pc = 2e-4, the mildest event the planner acts on, so every burn is a floor. Every
+    modelled number is in `assumptions`; show them next to the numbers.
+  - Station mass at launch masses: 43,980 kg (1 Jul: Tianhe + Tianzhou-2 + Shenzhou-12) and 57,480 kg
+    (21 Oct: + Tianzhou-3, Shenzhou-13); Isp 300 s (assumed). Starlink v1.x 260 kg, Isp 1500 s (assumed).
+  - Results: `reality` = cheapest station burn reaching the planner target (0.01 m/s, about 18 h lead): 0.1495 kg
+    (case 1) and 0.1954 kg (case 2). The same delta-v by the Starlink costs 0.18 g. If `recommend` picks the
+    Starlink's option A (0.02-0.03 m/s), `comparison.propellantRatio` is about 400. Note that the burns sit at
+    the planner's 0.01 m/s rounding grid, so ratios between small options move in steps.
+  - Historical elements (Space-Track GP_HISTORY) would replace only `incident._geometry()`. That needs a free
+    account. If the Lead wants it, add `SPACETRACK_USER` / `SPACETRACK_PASSWORD` to `.env.example` and the user
+    supplies them; nothing is hard-coded.
+- Status: done
+
+### Test environment: Windows path length (FYI)
+- From: Physics (be-physics)
+- To: Lead
+- Date: 2026-10-31
+- Request: on a Windows checkout with a deep parent folder, `backend/app/ai/cache/negotiation/iss-cosmos/*.txt`
+  exceeds the 260-character path limit, so 4 AI tests fail with `FileNotFoundError` (not a code bug). Pytest's
+  tmp dir can also be blocked. Running from a short path with `--basetemp` gives 235 passed. Consider a note in
+  the README or shorter cache file names.
+- Status: open
+
 ### Real data catalog assertions
 - From: Data (be-data)
 - To: Lead
