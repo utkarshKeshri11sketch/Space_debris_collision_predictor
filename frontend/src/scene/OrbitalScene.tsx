@@ -11,6 +11,7 @@ import ObjectCloud, { readDisplayedPosition, type LayerVisibility, type OrbitReg
 import { Encounter, SelectedObject, objectPositionAt } from './OrbitTrails';
 import DebrisCascade from './DebrisCascade';
 import LivingSky from './post/LivingSky';
+import ThreatBeacons from './ThreatBeacons';
 import './scene.css';
 
 const BloomEffects = lazy(() => import('./post/BloomEffects'));
@@ -275,6 +276,7 @@ function SceneContents({ props, onWorkerError, onHover, hoveredId, debug }: { pr
     <LivingSky quality={props.quality} />
     <SceneBoundary fallback={<EarthFallback />}><Earth quality={props.quality} /></SceneBoundary>
     {currentId === null && <RegimeRing />}
+    {props.mode === 'mission' && currentId === null && <ThreatBeacons idToIndex={idToIndex} buffers={buffers} />}
     {catalog.length > 0 && <ObjectCloud catalog={catalog} layers={props.layers} regime={props.regime} buffers={buffers} selectedIndex={currentId === null ? -1 : selectedIndex} hoveredIndex={hoveredIndex} onWorkerError={onWorkerError} />}
     {props.density && currentId === null && <DensityShells />}
     {selectedIndex >= 0 && <SelectedObject key={displayId} object={catalog[selectedIndex]} index={selectedIndex} buffers={buffers} exiting={currentId === null} />}
