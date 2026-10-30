@@ -1,7 +1,8 @@
 # Physics analysis: avoidance maneuvers and cascade simulation
 
 Owner: Physics agent (Claude #2), branch `be-physics`.
-Files: `backend/app/physics/maneuver.py`, `backend/app/physics/cascade.py`, `backend/tests/physics/`.
+Files: `app/physics/maneuver.py`, `app/physics/cascade.py`, `tests/physics/` (repo root, same layout as
+`app/ai/` on `be-ai`).
 
 Source of truth for the contract: `frontend/src/api/types.ts`, `frontend/src/api/client.ts`,
 `frontend/src/api/handlers.ts` and `frontend/src/api/mockData.ts` (commit `019aa51`).
@@ -10,8 +11,8 @@ Source of truth for the contract: `frontend/src/api/types.ts`, `frontend/src/api
 
 - `main` contains only `frontend/`, `README.md`, `TEAMMATE_HANDOFF.md` and `.gitignore`. There is no
   `AGENTS.md`/`CLAUDE.md` and no backend skeleton yet.
-- **Assumption:** the backend lives in `backend/` with the package at `backend/app/`. If the Lead uses a
-  different root, the files can be moved with `git mv` and nothing else changes.
+- **Update:** `be-ai` put its package at the repo root (`app/ai/`), so physics moved to `app/physics/`
+  as well. It was first committed under `backend/`.
 - Frontend environment variables (`frontend/.env.example`): `VITE_USE_MOCKS=true` (any value except
   `false` keeps MSW mocks on) and `VITE_API_BASE_URL=` (empty means the same origin; a trailing `/` is
   stripped).
@@ -142,16 +143,29 @@ TEME from SGP4 is fine), the combined covariance in contract form (`sigmaMajorM`
 3. **Burn effect:** Clohessy–Wiltshire impulsive response of the mover, from the burn at `TCA − lead` to
    TCA. The new relative position is r_rel ∓ δ, and the new miss is its component perpendicular to
    v_rel. The test checks CW against numerical two-body integration.
-4. **Search:** for each direction (prograde, retrograde, ±radial, ±normal), try burn leads on a
-   quarter-orbit grid near a 6 h nominal lead. Bound it by `now + 2 h` (commanding margin) and a 24 h
-   maximum. Find the smallest Δv ≤ 5 m/s that reaches **Pc ≤ 1e-7 and miss ≥ 1 km** (geometric scan,
-   then bisection).
-5. **Options:** the cheapest three directions become A/B/C, sorted by Δv, plus `no-action`. `recommended`
-   = option A when the current Pc ≥ 1e-4, otherwise `no-action`. All thresholds are parameters.
-6. **Propellant:** Tsiolkovsky, with an assumed mass/Isp table (ISS ≈ 420 t at 300 s; Starlink/OneWeb
-   electric propulsion; default 500 kg at 220 s hydrazine). Every value is commented as an assumption.
+4. **Search:** along-track burns only (prograde, retrograde), as the role brief asks and as LEO
+   operators normally fly. Burn leads lie on a quarter-orbit grid near three lead profiles: nominal
+   6 h, early 18 h, late 2 h. The window is bounded by `now + 2 h` (commanding margin) and a 24 h
+   maximum. The search finds the smallest Δv ≤ 5 m/s that reaches **Pc ≤ 1e-7 and miss ≥ 1 km**
+   (geometric scan, then bisection), rounded up to 0.01 m/s.
+5. **Options:**
+   - A: the cheaper direction at the nominal lead.
+   - B: the other direction at the nominal lead.
+   - C: A's direction, early (least Δv, least mature prediction).
+   - D: A's direction, late (most Δv).
+   - Plus `no-action`.
+   `recommended` = A when the current Pc ≥ 1e-4, otherwise `no-action`. All thresholds are parameters.
+6. **Propellant:** Tsiolkovsky, with an assumed mass/Isp table matching `app/ai/profiles.py` (ISS 420 t
+   at 300 s; Starlink 800 kg at 1500 s; OneWeb 150 kg at 1600 s; EO satellites 1 t at 220 s; default
+   500 kg at 220 s). Every value is commented as an assumption. Reported to 4 significant figures.
 7. **afterSeries:** linear relative motion `|r_rel' + v_rel·t|` on the same `tSec` grid as `rangeSeries`.
 8. The mover can be the primary or the secondary, so the AI negotiator can cost a burn for each operator.
+9. **Entry points:**
+   - `options(detail)` and `options_for(detail, mover_norad_id)` take a contract `ConjunctionDetail`.
+     Without screening's state vectors, `encounter_from_detail` rebuilds the geometry from `rtnM` and
+     `relSpeedKms`. It assumes both orbits are near-circular and meet at one altitude, so v_rel is
+     horizontal and the crossing angle comes from |v_rel| = 2v·sin(θ/2).
+   - `plan_maneuvers(encounter)` uses exact states when Screening supplies them.
 
 ### 4.2 `cascade.py`
 
@@ -175,9 +189,16 @@ TEME from SGP4 is fine), the combined covariance in contract form (`sigmaMajorM`
    shell with the largest contribution sets `altKm`, and seeded lat/lon are bounded by the parent
    inclination. Event fragments are the NSBM expectation for the colliding mass, and they feed back into
    the density (the cascade).
-7. **Baseline:** catalog survivors under the same decay model. With `includeLaunches`, add a constant
+7. **J2 nodal precession:** every fragment carries its inclination, taken from the kicked angular
+   momentum. Its node drifts at dΩ/dt = −1.5·n·J2·(R_E/p)²·cos i, integrated with decay, so sinking
+   fragments speed up. The spread of the central 90 % of nodes relative to the parent's own node
+   shows the plane fanning into a ring. `simulate(scenario).diagnostics` reports
+   `nodalSpreadDeg[year]` and `ringClosedYear`. The shell-density statistics are node-free: any
+   orbit at that altitude still crosses the debris plane twice per revolution, so the time-averaged
+   rates are unchanged.
+8. **Baseline:** catalog survivors under the same decay model. With `includeLaunches`, add a constant
    2 500 objects/yr. That figure is an assumption tied to recent tracked-catalog growth.
-8. `spreadDvMs` = mean and standard deviation of the sampled Δv magnitudes. `seed` is deterministic per
+9. `spreadDvMs` = mean and standard deviation of the sampled Δv magnitudes. `seed` is deterministic per
    (noradId, event), so identical requests return identical results (cacheable).
 
 ### 4.3 What the build changed (implemented and tested)
@@ -187,8 +208,14 @@ TEME from SGP4 is fine), the combined covariance in contract form (`sigmaMajorM`
 - **Mock fixtures are not self-consistent:** a 412 m miss with the mock covariance (186/74 m, HBR 58 m)
   gives Pc ≈ 3e-7, not 3.1e-4. Our Pc follows the geometry. For a "critical" demo the screening data
   needs a tighter miss or a larger covariance.
-- **Typical numbers** (ISS, Pc 4e-2, 130 m miss): a 0.03 m/s retrograde burn about 7.4 h before TCA
-  reaches about 1 km (about 4 kg of ISS propellant). A radial burn needs about 0.7 m/s.
+- **Typical numbers** (ISS × debris, mock-like detail, 150 m miss):
+  - A: 0.03 m/s prograde about 6 h out (about 4 kg of ISS propellant)
+  - C: 0.02 m/s about 16 h out
+  - D: 0.07 m/s about 2.7 h out
+  Along-track burns are cheap because the drift grows as about 3·Δv·t.
+- **J2 ring formation** (SL-16, 71°): the parent's node regresses at −2.1°/day. The fan closes into a
+  full ring within about 1 year after a collision (kicks of hundreds of m/s) and about 3 years after an
+  explosion. A FENGYUN fragment collision (98.7°) closes in about 4 years.
 - **`spreadDvMs`** describes the fragments that stay in orbit (the cloud the globe draws). For an SL-16
   collision that is mean ≈ 357 m/s, sd ≈ 583 m/s. Including NSBM's km/s tail, which escapes or
   re-enters at once, would give sd ≈ 2 km/s.
@@ -199,29 +226,30 @@ TEME from SGP4 is fine), the combined covariance in contract form (`sigmaMajorM`
   each, ≈ 835 km), and about 2 600 active satellites at higher risk in year 0.
 - **Dependencies:** `numpy` only. No SciPy and no `sgp4` inside `app/physics/maneuver.py` or
   `cascade.py`.
-- **Tests:** `backend/tests/physics/` (24 tests), run with `pytest backend/tests/physics`.
+- **Tests:** `tests/physics/` (32 tests, about 9 s), run with `pytest tests/physics`. They check closed-form
+  Pc, CW against two-body RK4, contract shapes, determinism, NSBM yields, decay lifetimes, J2 rates
+  (sun-synchronous ≈ 0.986°/day) and ring formation.
 
 ## 5. Dependencies on other agents
 
 | Need | From | Detail |
 |---|---|---|
 | Backend root and `app/models.py` Pydantic models | Lead | I return plain `dict`s with the exact camelCase keys above, ready for `Model.model_validate`. |
-| Router wiring | Lead | `POST /api/cascade` calls `simulate_cascade(parent, catalog, …)`. `GET /api/conjunctions/:id` adds `plan_maneuvers(...).to_contract()`. |
-| States at TCA, covariance, HBR, `rangeSeries` grid | Screening | Needs r/v of both objects at TCA in one inertial frame (km, km/s), the combined covariance in the encounter plane with angle from the radial axis, and HBR (m). Logged in `docs/CONTRACT_REQUESTS.md`. |
+| Router wiring | Lead | `POST /api/cascade` calls `simulate(request, catalog, environment=env).result`. `GET /api/conjunctions/:id` adds `plan_for_detail(detail).to_contract()`. See PHYS-2. |
+| States at TCA, covariance, HBR, `rangeSeries` grid | Screening (optional) | Improves geometry; not blocking, because the detail-only fallback exists. Needs r/v of both objects at TCA in one inertial frame (km, km/s), the combined covariance in the encounter plane with angle from the radial axis, and HBR (m). Logged in `docs/CONTRACT_REQUESTS.md`. |
 | Catalog objects (`noradId`, `name`, `type`, `active`, `omm`) | Data | `omm` needs MEAN_MOTION, ECCENTRICITY, INCLINATION, RA_OF_ASC_NODE, ARG_OF_PERICENTER, MEAN_ANOMALY, BSTAR. Cascade picker needs the exact names `SL-16 R/B`, `FENGYUN 1C DEB`, `IRIDIUM 33 DEB`. |
-| Calling the planner per operator | AI | `plan_maneuvers(encounter, mover="primary"/"secondary")` gives each agent its own costed options. |
+| Calling the planner per operator | AI | `options_for(detail, mover_norad_id)` answers be-ai's request (PHYS-6). |
 
 ## 6. Open questions
 
-1. **Backend root:** is it `backend/app/…`? (Assumed above.)
+1. **Backend root:** resolved, it is the repo root (`app/`), following `be-ai`.
 2. **Covariance:** neither OMM nor GP data carries covariance. Screening has to assume one (for example,
    growth with element age). We need one shared definition so Pc in the list and `newPc` in the options
    agree. I propose Screening calls my `collision_probability()`.
 3. **Cascade numbers:** NSBM numbers differ from the mock. An SL-16 collision gives ≈ 4 700 fragments
    (mock 12 784). An explosion gives ≈ 240 (mock 4 260). The orbiting-fragment Δv spread is
    ≈ {mean 357, sd 583} m/s (mock {85, 38}). The shader multiplies by `sd/100`, so the cloud will look
-   much wider. The frontend is out of scope for
-   me; flagged for the Lead.
+   much wider. The frontend is out of scope for me; flagged for the Lead.
 4. **Propellant:** real ISS propellant for 0.4 m/s is about 60 kg (mock 0.18 kg). We report real figures.
 5. **Recommendation threshold:** the default is 1e-4 (common NASA CARA/ESA practice), so
    `starlink-oneweb` (Pc 8.7e-5 in the mock) would default to "no action" while still listing burns.

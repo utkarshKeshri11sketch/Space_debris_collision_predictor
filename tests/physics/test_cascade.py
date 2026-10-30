@@ -175,6 +175,40 @@ def test_catalog_or_environment_and_validation(catalog, env):
         c.simulate_cascade(parent, event="collision", years=3, include_launches=True)
 
 
+def test_j2_nodal_rate_matches_known_orbits():
+    deg_per_day = lambda alt, inc: math.degrees(float(c.nodal_rate_rad_s(
+        np.array([c.R_E_KM + alt]), np.array([c.R_E_KM + alt]), np.array([math.radians(inc)]))[0])) * 86400
+    # A sun-synchronous orbit (~98.7 deg at ~830 km) precesses ~ +0.9856 deg/day, one turn per year.
+    assert deg_per_day(830, 98.7) == pytest.approx(0.9856, rel=0.02)
+    # ISS (~420 km, 51.64 deg) regresses about 5 deg/day.
+    assert deg_per_day(420, 51.64) == pytest.approx(-5.0, rel=0.03)
+    assert deg_per_day(800, 90.0) == pytest.approx(0.0, abs=1e-12)  # polar orbits do not precess
+
+
+def test_fragment_inclinations_scatter_around_parent():
+    rng = np.random.default_rng(3)
+    r, v = np.array([7000.0, 0.0, 0.0]), np.array([0.0, math.sqrt(c.MU_KM3_S2 / 7000.0), 0.0])
+    inc = math.radians(71.0)
+    _, _, frag_inc, bound = c._kick_to_orbits(rng, r, v, np.full(2000, 200.0), c._plane_normal_row(inc, 0.3))
+    spread = np.degrees(frag_inc[bound]) - 71.0
+    assert abs(np.median(spread)) < 0.3 and 0.3 < np.std(spread) < 2.0  # 200 m/s on 7.5 km/s: ~1 deg
+
+
+def test_simulate_scenario_and_ring_formation(catalog, env):
+    scenario = {"noradId": 22285, "event": "explosion", "years": 25, "includeLaunches": True}
+    run = c.simulate(scenario, catalog, environment=env)
+    assert run.result == c.simulate_cascade(named("SL-16 R/B"), event="explosion", years=25,
+                                            include_launches=True, environment=env)
+    spread = run.diagnostics["nodalSpreadDeg"]
+    assert len(spread) == 26 and spread[0] == 0.0
+    assert all(b >= a for a, b in zip(spread, spread[1:]))  # differential precession only widens the fan
+    assert spread[1] < 360 and spread[-1] == 360  # a plane in year 1, a full ring later
+    assert run.diagnostics["ringClosedYear"] == next(y for y, w in enumerate(spread) if w >= 360)
+    assert run.diagnostics["parentNodalRateDegPerDay"] < 0  # 71 deg prograde orbit regresses
+    with pytest.raises(LookupError):
+        c.simulate({**scenario, "noradId": 1}, catalog, environment=env)
+
+
 def test_accepts_attribute_objects(env):
     class Obj:
         def __init__(self, data):

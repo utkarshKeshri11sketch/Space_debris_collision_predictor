@@ -7,10 +7,15 @@ Returns a dict shaped exactly like `CascadeResult` (frontend/src/api/types.ts). 
 2. Orbits: each fragment's velocity kick is applied to the parent state, giving its perigee/apogee.
 3. Decay: atmospheric drag with an exponential atmosphere and the King-Hele orbit-averaged density,
    integrated in 10-day steps.
-4. Environment: catalog and fragments are binned into altitude shells by time-weighted Keplerian
-   residence (the "particle-in-a-box" picture used by NASA/ESA long-term models). Over years, J2
-   precession smears nodes, so a shell model is reasonable.
-5. Secondary collisions: kinetic-gas collision rate between fragments and intact objects in each
+4. J2 nodal precession: each fragment's node drifts at its own rate,
+   dΩ/dt = -1.5 n J2 (R_E/p)^2 cos i, integrated alongside decay. Different kicks give different
+   (a, e, i), so the nodes fan out and the debris turns from one orbital plane into a ring around
+   Earth. `simulate()` reports the nodal spread per year and the year the ring closes.
+5. Environment: catalog and fragments are binned into altitude shells by time-weighted Keplerian
+   residence (the "particle-in-a-box" picture used by NASA/ESA long-term models). Shell averaging
+   ignores where the nodes sit. That is exact once the ring has closed, and a fair time-average
+   before: any orbit at that altitude still crosses the debris plane twice per revolution.
+6. Secondary collisions: kinetic-gas collision rate between fragments and intact objects in each
    shell. New breakups feed back into the population (the cascade).
 
 This is an approximate engineering model for an environmental-impact story, not a validated
@@ -29,7 +34,10 @@ import numpy as np
 
 MU_KM3_S2 = 398600.4418  # Earth GM, km^3/s^2
 R_E_KM = 6378.137  # WGS-84 equatorial radius
+J2 = 1.08262668e-3  # Earth oblateness (EGM-96)
 SECONDS_PER_YEAR = 365.25 * 86400.0
+# The ring counts as closed when the central 90 % of fragment nodes spans the full 360 degrees.
+RING_CLOSED_SPAN_DEG = 360.0
 
 MAX_YEARS = 25  # the frontend slider range (1-25)
 STEPS_PER_YEAR = 36  # ~10-day drag steps; fine for decay over years, not for final-day re-entry timing
@@ -142,12 +150,29 @@ def _perigee_apogee_from_omm(omm: Mapping[str, Any]) -> tuple[float, float]:
     return a * (1 - e), a * (1 + e)
 
 
+def _plane_normal_row(inclination_rad: float, arg_rad: float) -> np.ndarray:
+    """Third row of the perifocal-to-inertial rotation: maps a perifocal vector to its equatorial-
+    normal (z) component. Used to get fragment inclinations: cos i = h_z / |h|."""
+    return np.array([math.sin(inclination_rad) * math.sin(arg_rad),
+                     math.sin(inclination_rad) * math.cos(arg_rad),
+                     math.cos(inclination_rad)])
+
+
+def nodal_rate_rad_s(rp_km: np.ndarray, ra_km: np.ndarray, inc_rad: np.ndarray) -> np.ndarray:
+    """Secular J2 regression of the node: dΩ/dt = -1.5 n J2 (R_E / p)^2 cos i."""
+    a = 0.5 * (rp_km + ra_km)
+    e = (ra_km - rp_km) / (ra_km + rp_km)
+    p = a * (1 - e * e)
+    n = np.sqrt(MU_KM3_S2 / a**3)
+    return -1.5 * n * J2 * (R_E_KM / p) ** 2 * np.cos(inc_rad)
+
+
 def _parent_state(omm: Mapping[str, Any]) -> tuple[np.ndarray, np.ndarray]:
     """Perifocal position/velocity at the OMM epoch from mean elements.
 
     SGP4 mean elements differ from osculating ones by a few km; that is negligible against
-    breakup kicks of ~100 m/s. Orientation does not matter, because kicks are isotropic and the
-    shell model is orientation-free.
+    breakup kicks of ~100 m/s. The node does not matter here, because the shell model is
+    node-free and J2 spreading is measured relative to the parent's own node.
     """
     n = _num(omm, "MEAN_MOTION") * 2 * math.pi / 86400.0
     a = (MU_KM3_S2 / n**2) ** (1 / 3)
@@ -225,18 +250,24 @@ def sample_fragments(rng: np.random.Generator, count: int, event: Event, rocket_
     return Fragments(lc[keep], mass[keep], CD_FRAGMENT * area[keep] / mass[keep], dv[keep])
 
 
-def _kick_to_orbits(rng: np.random.Generator, r: np.ndarray, v: np.ndarray, dv_ms: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Isotropic kicks (NSBM assumption). Returns perigee radius, apogee radius and a bound mask."""
+def _kick_to_orbits(rng: np.random.Generator, r: np.ndarray, v: np.ndarray, dv_ms: np.ndarray,
+                    plane_z: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Isotropic kicks (NSBM assumption) on a perifocal state.
+
+    Returns perigee radius, apogee radius, inclination (rad) and a bound mask.
+    """
     d = rng.normal(size=(dv_ms.size, 3))
     d /= np.linalg.norm(d, axis=1, keepdims=True)
     vel = v + d * (dv_ms[:, None] / 1000.0)
     rmag = float(np.linalg.norm(r))
     energy = 0.5 * np.sum(vel**2, axis=1) - MU_KM3_S2 / rmag
-    h2 = np.sum(np.cross(r, vel) ** 2, axis=1)
+    h = np.cross(r, vel)
+    h2 = np.sum(h**2, axis=1)
     bound = energy < 0
     a = np.where(bound, -MU_KM3_S2 / (2 * np.where(bound, energy, -1.0)), np.nan)
     e = np.sqrt(np.maximum(0.0, 1 + 2 * energy * h2 / MU_KM3_S2**2))
-    return a * (1 - e), a * (1 + e), bound
+    inc = np.arccos(np.clip(h @ plane_z / np.sqrt(h2), -1.0, 1.0))
+    return a * (1 - e), a * (1 + e), inc, bound
 
 
 # --- Drag decay ----------------------------------------------------------------------------------
@@ -265,6 +296,12 @@ class _Population:
     ra: np.ndarray
     ballistic: np.ndarray
     mass: np.ndarray
+    # Optional J2 node tracking (None for the catalog baseline, where it is not needed).
+    inc: np.ndarray | None = None  # inclination, rad
+    node: np.ndarray | None = None  # accumulated nodal drift since creation, rad (not wrapped)
+    origin: np.ndarray | None = None  # 0 = primary breakup, k = k-th secondary collision
+
+    _FIELDS = ("rp", "ra", "ballistic", "mass", "inc", "node", "origin")
 
     def decay(self, years: float, steps_per_year: int = STEPS_PER_YEAR) -> None:
         steps = max(1, round(years * steps_per_year)) if years > 0 else 0
@@ -274,17 +311,23 @@ class _Population:
         for _ in range(steps):
             self.rp, self.ra = decay_step(self.rp, self.ra, self.ballistic, dt)
             self._drop_reentered()
+            if self.node is not None:
+                # Rate from the decayed orbit, so lower fragments precess faster as they sink.
+                self.node = self.node + nodal_rate_rad_s(self.rp, self.ra, self.inc) * dt
 
     def _drop_reentered(self) -> None:
         alive = (self.rp - R_E_KM) >= REENTRY_PERIGEE_KM
         if not alive.all():
-            self.rp, self.ra, self.ballistic, self.mass = self.rp[alive], self.ra[alive], self.ballistic[alive], self.mass[alive]
+            for name in self._FIELDS:
+                values = getattr(self, name)
+                if values is not None:
+                    setattr(self, name, values[alive])
 
     def extend(self, other: "_Population") -> None:
-        self.rp = np.concatenate([self.rp, other.rp])
-        self.ra = np.concatenate([self.ra, other.ra])
-        self.ballistic = np.concatenate([self.ballistic, other.ballistic])
-        self.mass = np.concatenate([self.mass, other.mass])
+        for name in self._FIELDS:
+            mine, theirs = getattr(self, name), getattr(other, name)
+            if mine is not None and theirs is not None:
+                setattr(self, name, np.concatenate([mine, theirs]))
 
 
 # --- Shell densities -----------------------------------------------------------------------------
@@ -383,13 +426,62 @@ def _seed(norad_id: int, event: Event) -> int:
 
 
 def _breakup_population(rng: np.random.Generator, r: np.ndarray, v: np.ndarray, count: int, event: Event,
-                        rocket_body: bool, mass_budget_kg: float) -> tuple[_Population, Fragments, np.ndarray]:
-    """Returns the orbiting population, all sampled fragments, and the mask of those left in orbit."""
+                        rocket_body: bool, mass_budget_kg: float, plane_z: np.ndarray,
+                        origin: int = 0) -> tuple[_Population, Fragments, np.ndarray]:
+    """Returns the orbiting population, all sampled fragments, and the mask of those left in orbit.
+    `r`, `v` are perifocal; `plane_z` orients that frame (see `_plane_normal_row`)."""
     frags = sample_fragments(rng, count, event, rocket_body, mass_budget_kg)
-    rp, ra, bound = _kick_to_orbits(rng, r, v, frags.dv_ms)
+    rp, ra, inc, bound = _kick_to_orbits(rng, r, v, frags.dv_ms, plane_z)
     keep = bound & ((rp - R_E_KM) >= REENTRY_PERIGEE_KM)
-    pop = _Population(rp[keep], ra[keep], frags.ballistic[keep], frags.mass_kg[keep])
+    n = int(keep.sum())
+    pop = _Population(rp[keep], ra[keep], frags.ballistic[keep], frags.mass_kg[keep],
+                      inc[keep], np.zeros(n), np.full(n, origin, dtype=np.int32))
     return pop, frags, keep
+
+
+def _nodal_spread_deg(pop: _Population, parent_rate_rad_s: float, t_s: float) -> float:
+    """Width of the central 90 % of primary-fragment nodes, measured from the parent's own
+    precessing node. 360 means the debris has wrapped into a full ring."""
+    primary = pop.origin == 0
+    if not primary.any():
+        return 0.0
+    rel = np.degrees(pop.node[primary] - parent_rate_rad_s * t_s)
+    lo, hi = np.percentile(rel, [5, 95])
+    return round(float(min(RING_CLOSED_SPAN_DEG, hi - lo)), 1)
+
+
+@dataclass
+class CascadeRun:
+    """`result` is the exact CascadeResult. `diagnostics` is extra context for the AI brief and
+    debugging, not part of the HTTP contract."""
+
+    result: dict
+    diagnostics: dict
+
+
+def simulate(
+    scenario: Any,
+    catalog: Iterable[Any] | None = None,
+    *,
+    environment: CatalogEnvironment | None = None,
+    parent: Any = None,
+) -> CascadeRun:
+    """Role-brief entry point. `scenario` is a CascadeRequest (dict or model with noradId, event,
+    years, includeLaunches). The parent is looked up in `catalog` unless given.
+
+    Raises LookupError when the object is not in the catalog (router: 404) and ValueError for an
+    invalid scenario (router: 400).
+    """
+    norad_id = int(_field(scenario, "noradId"))
+    if parent is None:
+        if catalog is None:
+            raise ValueError("catalog or parent is required")
+        catalog = list(catalog)
+        parent = next((o for o in catalog if int(_field(o, "noradId")) == norad_id), None)
+        if parent is None:
+            raise LookupError(f"Object {norad_id} is not in the loaded catalog")
+    return _run(parent, catalog, event=_field(scenario, "event"), years=_field(scenario, "years"),
+                include_launches=bool(_field(scenario, "includeLaunches", False)), environment=environment)
 
 
 def simulate_cascade(
@@ -401,11 +493,18 @@ def simulate_cascade(
     include_launches: bool,
     environment: CatalogEnvironment | None = None,
 ) -> dict:
-    """Run the breakup scenario. `parent` and catalog items are `CatalogObject`s (dicts or models).
+    """Run the breakup scenario and return the CascadeResult dict. `parent` and catalog items are
+    `CatalogObject`s (dicts or models).
 
     Pass a cached `environment` (from `build_environment`) to skip the ~1 s catalog precomputation.
     Raises ValueError for an unknown event or a parent without usable orbital elements.
     """
+    return _run(parent, catalog, event=event, years=years, include_launches=include_launches,
+                environment=environment).result
+
+
+def _run(parent: Any, catalog: Iterable[Any] | None, *, event: Event, years: float, include_launches: bool,
+         environment: CatalogEnvironment | None) -> CascadeRun:
     if event not in ("collision", "explosion"):
         raise ValueError("event must be 'collision' or 'explosion'")
     horizon = int(max(1, min(MAX_YEARS, round(float(years)))))  # same clamp as the mock handler
@@ -423,6 +522,9 @@ def simulate_cascade(
     rng = np.random.default_rng(seed)
     r0, v0 = _parent_state(omm)
     inclination = math.radians(_num(omm, "INCLINATION"))
+    parent_plane = _plane_normal_row(inclination, math.radians(_num(omm, "ARG_OF_PERICENTER")))
+    parent_rp, parent_ra = _perigee_apogee_from_omm(omm)
+    parent_rate = float(nodal_rate_rad_s(np.array([parent_rp]), np.array([parent_ra]), np.array([inclination]))[0])
 
     mass = assumed_mass_kg(norad_id, kind)
     if event == "explosion":
@@ -433,7 +535,8 @@ def simulate_cascade(
     else:
         count = collision_fragment_yield(IMPACTOR_ON_INTACT_KG, mass)
         budget = mass + IMPACTOR_ON_INTACT_KG
-    pop, primary, in_orbit = _breakup_population(rng, r0, v0, int(round(count)), event, kind == "ROCKET_BODY", budget)
+    pop, primary, in_orbit = _breakup_population(rng, r0, v0, int(round(count)), event, kind == "ROCKET_BODY",
+                                                 budget, parent_plane)
     fragment_count = int(primary.dv_ms.size)
 
     env = environment
@@ -470,6 +573,7 @@ def simulate_cascade(
 
     density = fragment_density()
     rows = [stats(0, density)]
+    spread = [0.0]
     secondary: list[dict] = []
     rate_prev = shell_rates(0, density)
     cumulative = 0.0
@@ -492,16 +596,18 @@ def simulate_cascade(
             # Expected NSBM yield when a random surviving fragment strikes an intact satellite.
             n_new = int(round(float(collision_fragment_yield(pop.mass, INTACT_TARGET_KG).mean()))) if pop.mass.size else 0
             r_c = R_E_KM + alt_km
+            # Argument of latitude of the impact point. The struck satellite's plane is assumed to
+            # have the parent's inclination: the debris band is densest there.
+            u = rng.uniform(0, 2 * math.pi)
             new_pop, new_frags, _ = _breakup_population(
                 rng, np.array([r_c, 0.0, 0.0]), np.array([0.0, math.sqrt(MU_KM3_S2 / r_c), 0.0]),
-                n_new, "collision", False, INTACT_TARGET_KG + float(pop.mass.max(initial=0.0)))
+                n_new, "collision", False, INTACT_TARGET_KG + float(pop.mass.max(initial=0.0)),
+                _plane_normal_row(inclination, u), origin=len(secondary) + 1)
             new_pop.decay(year - when)
-            u = rng.uniform(0, 2 * math.pi)
             secondary.append({
                 "year": round(when, 1),
-                # Latitude of a point on an orbit with the parent's inclination (J2 spreads nodes,
-                # so the longitude is effectively random).
                 "latDeg": round(math.degrees(math.asin(math.sin(inclination) * math.sin(u))), 1),
+                # Longitude is effectively random: J2 has spread the debris nodes around the globe.
                 "lonDeg": round(float(rng.uniform(-180.0, 180.0)), 1),
                 "altKm": round(alt_km),
                 "fragments": int(new_frags.dv_ms.size),
@@ -512,9 +618,10 @@ def simulate_cascade(
         if len(secondary) > events_before:  # new fragments joined this year
             density = fragment_density()
         rows.append(stats(year, density))
+        spread.append(_nodal_spread_deg(pop, parent_rate, year * SECONDS_PER_YEAR))
         rate_prev = shell_rates(year, density)
 
-    return {
+    result = {
         "parent": {
             "noradId": norad_id,
             "name": _field(parent, "name", ""),
@@ -530,3 +637,13 @@ def simulate_cascade(
         "years": rows,
         "secondaryCollisions": secondary,
     }
+    diagnostics = {
+        "nodalSpreadDeg": spread,
+        "ringClosedYear": next((year for year, width in enumerate(spread) if width >= RING_CLOSED_SPAN_DEG), None),
+        "parentNodalRateDegPerDay": round(math.degrees(parent_rate) * 86400.0, 4),
+        "fragmentsInOrbitAtBreakup": int(in_orbit.sum()),
+        "assumedParentMassKg": mass,
+        "model": "NASA Standard Breakup Model (Lc >= 10 cm), exponential-atmosphere drag, J2 nodal "
+                 "precession, shell-density collision rates. Approximate; not an operational forecast.",
+    }
+    return CascadeRun(result, diagnostics)
