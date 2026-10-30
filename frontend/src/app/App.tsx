@@ -6,6 +6,8 @@ import { api, isMockMode } from '../api/client';
 import type { CascadeResult, CatalogObject, Conjunction } from '../api/types';
 import { SimClockTicker, useSimStore } from '../sim/clock';
 import { Icon } from '../ui/Icon';
+import Ticker from '../ui/Ticker';
+import { ThreatRow } from '../ui/DemoMotion';
 import ObjectInspector from '../features/mission-control/ObjectInspector';
 import '../features/features.css';
 import '../styles/console.css';
@@ -731,7 +733,8 @@ function MissionThreats({
           </div>
         ) : (
           visible.map((c, i) => (
-            <button
+            <ThreatRow
+              index={i}
               key={c.id}
               className={`threat-row threat-${c.risk}`}
               onClick={() => onOpen(c.id)}
@@ -764,7 +767,7 @@ function MissionThreats({
                   <Icon name="arrow" size={14} />
                 </div>
               )}
-            </button>
+            </ThreatRow>
           ))
         )}
       </div>
@@ -783,17 +786,13 @@ function MissionMetrics({ threats }: { threats: Conjunction[] | undefined }) {
       {[
         {
           label: 'OBJECTS TRACKED',
-          value: meta.data ? compact(meta.data.objectCount) : '—',
+          value: <Ticker value={meta.data?.objectCount} />,
           unit: 'objects',
         },
-        { label: 'CLOSE APPROACHES', value: threats?.length.toString() ?? '—', unit: '/ 7 days' },
+        { label: 'CLOSE APPROACHES', value: <Ticker value={threats?.length} />, unit: '/ 7 days' },
         {
           label: 'HIGH + CRITICAL',
-          value:
-            threats
-              ?.filter((c) => c.risk !== 'watch')
-              .length.toString()
-              .padStart(2, '0') ?? '—',
+          value: <Ticker value={threats?.filter((c) => c.risk !== 'watch').length} format={n => Math.round(n).toString().padStart(2, '0')} />,
           unit: 'events',
           warn: true,
         },

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Billboard, Html, Line } from '@react-three/drei';
-import { AdditiveBlending, BufferGeometry, Group, Mesh, MeshBasicMaterial, Vector3 } from 'three';
+import { AdditiveBlending, BufferGeometry, Color, Group, Mesh, MeshBasicMaterial, Vector3 } from 'three';
 import { json2satrec, propagate, type OMMJsonObject } from 'satellite.js';
 import type { CatalogObject, Conjunction } from '../api/types';
 import { useSimStore } from '../sim/store';
@@ -51,6 +51,7 @@ export function SelectedObject({
 }) {
   const group = useRef<Group>(null);
   const ring = useRef<Mesh>(null);
+  const ringColor = useMemo(() => new Color(object.type === 'DEBRIS' ? '#ff8a3d' : object.type === 'PAYLOAD' ? '#ff5d66' : '#b7c0d1').multiplyScalar(6), [object.type]);
   const reduced = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
   const points = useMemo(() => orbitPoints(object, useSimStore.getState().timeMs), [object]);
   const trail = useMemo(() => {
@@ -83,13 +84,8 @@ export function SelectedObject({
           <mesh ref={ring}>
             <ringGeometry args={[0.16, 0.165, 64]} />
             <meshBasicMaterial
-              color={
-                object.type === 'PAYLOAD'
-                  ? '#ff5d66'
-                  : object.type === 'DEBRIS'
-                    ? '#ff8a3d'
-                    : '#b7c0d1'
-              }
+              color={ringColor}
+              toneMapped={false}
               transparent
               opacity={0.8}
               depthTest={false}

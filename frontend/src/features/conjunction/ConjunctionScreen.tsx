@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import Ticker from '../../ui/Ticker';
 import { useNavigate } from 'react-router-dom';
 import { useConjunction } from '../../api/hooks';
 import { isMockMode } from '../../api/client';
@@ -252,7 +253,7 @@ export default function ConjunctionScreen({ id, onReplay, onPreviewBurn, onNegot
         <dl className="encounter-metrics">
           <div>
             <dt>Predicted miss</dt>
-            <dd>{formatDistance(data.missDistanceM)}</dd>
+            <dd><Ticker value={data.missDistanceM} format={formatDistance} /></dd>
           </div>
           <div>
             <dt>Collision probability</dt>

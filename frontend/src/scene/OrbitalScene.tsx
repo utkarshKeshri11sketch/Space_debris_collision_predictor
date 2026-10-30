@@ -1,7 +1,7 @@
-import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { CameraControls, Html, Line, Stats } from '@react-three/drei';
-import { ACESFilmicToneMapping, BufferAttribute, BufferGeometry, DirectionalLight, Quaternion, SRGBColorSpace, Vector3 } from 'three';
+import { ACESFilmicToneMapping, DirectionalLight, Quaternion, SRGBColorSpace, Vector3 } from 'three';
 import type CameraControlsImpl from 'camera-controls';
 import { useCatalog } from '../api/hooks';
 import type { CatalogObject, CascadeResult, Conjunction } from '../api/types';
@@ -10,7 +10,11 @@ import Earth, { EarthFallback, solarDirection } from './Earth';
 import ObjectCloud, { readDisplayedPosition, type LayerVisibility, type OrbitRegime, type PositionBuffers } from './ObjectCloud';
 import { Encounter, SelectedObject, objectPositionAt } from './OrbitTrails';
 import DebrisCascade from './DebrisCascade';
+import LivingSky from './post/LivingSky';
+import ThreatBeacons from './ThreatBeacons';
 import './scene.css';
+
+const BloomEffects = lazy(() => import('./post/BloomEffects'));
 
 const EMPTY_CATALOG: CatalogObject[] = [];
 const CAMERA_SETTINGS = { position: [0, 0.9, 4.3] as [number, number, number], fov: 40, near: 0.01, far: 180 };
@@ -36,24 +40,6 @@ class SceneBoundary extends Component<{ children: ReactNode; fallback?: ReactNod
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
   render() { return this.state.failed ? this.props.fallback ?? <div className="scene-fallback"><div /><span>3D view unavailable</span><small>Object search and threat analysis are still available.</small></div> : this.props.children; }
-}
-
-function Starfield({ quality }: { quality: 'high' | 'low' }) {
-  const geometry = useMemo(() => {
-    const count = quality === 'high' ? 12000 : 4000;
-    const positions = new Float32Array(count * 3), colors = new Float32Array(count * 3);
-    let seed = 137;
-    const random = () => { seed = Math.imul(seed, 1664525) + 1013904223 | 0; return (seed >>> 0) / 4294967296; };
-    for (let i = 0; i < count; i++) {
-      const y = random() * 2 - 1, angle = random() * Math.PI * 2, horizontal = Math.sqrt(1 - y * y);
-      positions[i * 3] = Math.cos(angle) * horizontal * 90; positions[i * 3 + 1] = y * 90; positions[i * 3 + 2] = Math.sin(angle) * horizontal * 90;
-      const magnitude = 0.13 + Math.pow(random(), 6) * 0.73;
-      colors[i * 3] = magnitude * (0.85 + random() * 0.15); colors[i * 3 + 1] = magnitude * 0.94; colors[i * 3 + 2] = magnitude;
-    }
-    const result = new BufferGeometry(); result.setAttribute('position', new BufferAttribute(positions, 3)); result.setAttribute('color', new BufferAttribute(colors, 3)); return result;
-  }, [quality]);
-  useEffect(() => () => geometry.dispose(), [geometry]);
-  return <points geometry={geometry} raycast={() => null}><pointsMaterial size={0.13} vertexColors sizeAttenuation transparent opacity={0.72} depthWrite={false} /></points>;
 }
 
 function SolarLighting() {
@@ -287,9 +273,10 @@ function SceneContents({ props, onWorkerError, onHover, hoveredId, debug }: { pr
   return <>
     <color attach="background" args={['#05070d']} />
     <SolarLighting />
-    <Starfield quality={props.quality} />
+    <LivingSky quality={props.quality} />
     <SceneBoundary fallback={<EarthFallback />}><Earth quality={props.quality} /></SceneBoundary>
     {currentId === null && <RegimeRing />}
+    {props.mode === 'mission' && currentId === null && <ThreatBeacons idToIndex={idToIndex} buffers={buffers} />}
     {catalog.length > 0 && <ObjectCloud catalog={catalog} layers={props.layers} regime={props.regime} buffers={buffers} selectedIndex={currentId === null ? -1 : selectedIndex} hoveredIndex={hoveredIndex} onWorkerError={onWorkerError} />}
     {props.density && currentId === null && <DensityShells />}
     {selectedIndex >= 0 && <SelectedObject key={displayId} object={catalog[selectedIndex]} index={selectedIndex} buffers={buffers} exiting={currentId === null} />}
@@ -321,6 +308,7 @@ export default function OrbitalScene(props: OrbitalSceneProps) {
     <SceneBoundary>
       <Canvas camera={CAMERA_SETTINGS} dpr={props.quality === 'high' ? [1, 1.75] : 1} frameloop={visible ? 'always' : 'never'} gl={rendererSettings} onCreated={({ gl }) => { gl.toneMapping = ACESFilmicToneMapping; gl.toneMappingExposure = 1.18; gl.outputColorSpace = SRGBColorSpace; gl.domElement.setAttribute('role', 'img'); gl.domElement.setAttribute('aria-label', 'Earth orbit visualization. Drag to rotate, scroll to zoom. Click a catalog dot for object information.'); }}>
         <Suspense fallback={null}><SceneContents props={props} onWorkerError={reportError} onHover={onHover} hoveredId={catalog?.[hover.index]?.noradId ?? null} debug={debug} /></Suspense>
+        {props.quality === 'high' && <SceneBoundary fallback={<></>}><Suspense fallback={null}><BloomEffects /></Suspense></SceneBoundary>}
       </Canvas>
     </SceneBoundary>
     <div className="scene-vignette" />

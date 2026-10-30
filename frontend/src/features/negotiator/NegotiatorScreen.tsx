@@ -4,6 +4,7 @@ import { api, isMockMode } from '../../api/client';
 import { useConjunction } from '../../api/hooks';
 import type { NegotiationEvent } from '../../api/types';
 import { formatDistance, formatProbability, formatPropellant, formatUtc } from '../../lib/format';
+import { ScoreFill, SignedStamp } from '../../ui/DemoMotion';
 import { knownValues } from '../../lib/grounding';
 import { PhysicsText } from '../../ui/PhysicsText';
 import { WeightExplorer } from './WeightExplorer';
@@ -276,14 +277,14 @@ export default function NegotiatorScreen({ conjunctionId, onAgreement }: Props) 
                     <div className="score-bar-row">
                       <span>A</span>
                       <div>
-                        <i style={{ width: `${(criterion.a / max) * 100}%` }} />
+                        <ScoreFill fraction={criterion.a / max} />
                       </div>
                       <b>{criterion.a.toFixed(1)}</b>
                     </div>
                     <div className="score-bar-row b">
                       <span>B</span>
                       <div>
-                        <i style={{ width: `${(criterion.b / max) * 100}%` }} />
+                        <ScoreFill fraction={criterion.b / max} />
                       </div>
                       <b>{criterion.b.toFixed(1)}</b>
                     </div>
@@ -310,9 +311,9 @@ export default function NegotiatorScreen({ conjunctionId, onAgreement }: Props) 
         </section>
         {agreement && (
           <section className="agreement-plan">
-            <div className="agreement-status">
+            <SignedStamp>
               <span aria-hidden="true">✓</span> Agreement signed
-            </div>
+            </SignedStamp>
             <h3>{agreement.mover.name} maneuvers.</h3>
             <dl>
               <div>

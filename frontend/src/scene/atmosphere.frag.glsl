@@ -8,5 +8,8 @@ void main() {
   float fresnel = pow(1.0 - abs(dot(viewDirection, normal)), 5.5);
   float light = smoothstep(-0.30, 0.75, dot(normal, normalize(uSun)));
   float alpha = fresnel * (0.11 + light * 0.7);
-  gl_FragColor = vec4(mix(vec3(0.05, 0.22, 0.50), vec3(0.30, 0.67, 0.94), light), alpha);
+  vec3 limb = mix(vec3(0.05, 0.22, 0.50), vec3(0.30, 0.67, 0.94), light);
+  gl_FragColor = vec4(limb * (1.0 + fresnel * light * 2.0), alpha);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
 }

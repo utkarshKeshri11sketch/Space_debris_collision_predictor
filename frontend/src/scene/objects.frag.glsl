@@ -5,6 +5,10 @@ void main() {
   if (radius > 1.0 || vAlpha < 0.01) discard;
   float core = exp(-radius * radius * 4.0);
   float halo = (1.0 - radius) * 0.18;
-  // Alpha-over compositing preserves class hue even where many LEO points overlap.
-  gl_FragColor = vec4(vColor, min(1.0, core + halo) * vAlpha);
+  // HDR at the small core crosses bloom's high threshold. A dim soft halo
+  // stays in this same sprite/draw call; alpha-over preserves dense class hues.
+  vec3 radiance = vColor * (1.0 + 4.2 * core) + vColor * halo;
+  gl_FragColor = vec4(radiance, min(1.0, core + halo) * vAlpha);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
 }
