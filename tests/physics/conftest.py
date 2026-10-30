@@ -1,4 +1,4 @@
-# Lets `pytest backend/tests/physics` import `app.*` before the Lead adds a project-wide config.
+# Lets `pytest tests/physics` import `app.*` (repo root) before the Lead adds a project-wide config.
 import sys
 from pathlib import Path
 

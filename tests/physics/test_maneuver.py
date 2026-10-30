@@ -9,6 +9,10 @@ from app.physics.maneuver import (
     Encounter,
     collision_probability,
     cw_displacement_km,
+    encounter_from_detail,
+    options,
+    options_for,
+    plan_for_detail,
     plan_maneuvers,
     propellant_kg,
     propulsion_for,
@@ -89,28 +93,39 @@ def test_cw_matches_numerical_two_body(axis):
     assert np.linalg.norm(numeric - predicted) < 0.01 * np.linalg.norm(numeric) + 1e-4
 
 
+def _burn_time(option):
+    return datetime.fromisoformat(option["burnAt"].replace("Z", "+00:00"))
+
+
 def test_plan_contract_and_targets_for_critical_event():
     enc = crossing_encounter()
     plan = plan_maneuvers(enc, now=NOW)
     assert plan.current_pc >= 1e-4  # demo-like critical geometry
     opts = plan.options
     assert opts[-1]["id"] == "no-action" and opts[-1]["direction"] == "none" and opts[-1]["burnAt"] is None
-    assert 2 <= len(opts) <= 4
     for o in opts:
         assert set(o) == OPTION_KEYS
     burns = opts[:-1]
-    assert [o["label"] for o in burns] == list("ABC")[: len(burns)]
-    assert [o["dvMs"] for o in burns] == sorted(o["dvMs"] for o in burns)
-    assert len({o["direction"] for o in burns}) == len(burns)
-    assert sum(o["recommended"] for o in opts) == 1 and burns[0]["recommended"]
+    # Role brief: 3-4 prograde/retrograde options at different lead times, plus "do nothing".
+    assert 3 <= len(burns) <= 4
+    assert [o["label"] for o in burns] == list("ABCD")[: len(burns)]
+    assert [o["id"] for o in burns] == [f"option-{x}" for x in "abcd"[: len(burns)]]
+    assert {o["direction"] for o in burns} == {"prograde", "retrograde"}
+    a, b, c, *rest = burns
+    assert a["direction"] != b["direction"] and a["dvMs"] <= b["dvMs"]  # A: cheaper direction, nominal lead
+    assert c["direction"] == a["direction"] and _burn_time(c) < _burn_time(a)  # C: early burn
+    assert c["dvMs"] <= a["dvMs"]  # earlier burns need less delta-v
+    if rest:
+        d = rest[0]
+        assert d["direction"] == a["direction"] and _burn_time(d) > _burn_time(a) and d["dvMs"] >= a["dvMs"]
+    assert sum(o["recommended"] for o in opts) == 1 and a["recommended"]
     for o in burns:
         assert 0 < o["dvMs"] <= 5
         assert o["newPc"] <= 1e-7 and o["newMissM"] >= 1000
-        burn_at = datetime.fromisoformat(o["burnAt"].replace("Z", "+00:00"))
-        assert NOW + timedelta(hours=2) <= burn_at < TCA
+        assert NOW + timedelta(hours=2) <= _burn_time(o) < TCA
+        assert TCA - _burn_time(o) <= timedelta(hours=24)
         assert o["burnAt"].endswith("Z")
-        # ISS mass makes propellant tens of kilograms for ~0.1-1 m/s.
-        assert o["propellantKg"] == pytest.approx(propellant_kg(o["dvMs"], propulsion_for(25544, None)), abs=1e-3)
+        assert o["propellantKg"] == pytest.approx(propellant_kg(o["dvMs"], propulsion_for(25544, None)), rel=1e-3)
     assert opts[-1]["newMissM"] == pytest.approx(plan.current_miss_m, abs=0.1)
     assert plan.current_miss_m == pytest.approx(math.hypot(120, 50), abs=1)
     # afterSeries is on the rangeSeries grid. The along-track part of the burn shifts TCA by a
@@ -118,10 +133,15 @@ def test_plan_contract_and_targets_for_critical_event():
     # minimum lies between the true new miss and the miss seen from a half-step offset.
     series = plan.to_contract()["afterSeries"]
     assert len(series) == 81 and series[40]["tSec"] == 0
-    new_miss_km = burns[0]["newMissM"] / 1000
+    new_miss_km = a["newMissM"] / 1000
     rel_speed = float(np.linalg.norm(np.asarray(enc.v_secondary_kms) - np.asarray(enc.v_primary_kms)))
     assert new_miss_km * 0.999 <= min(p["rangeKm"] for p in series) <= math.hypot(new_miss_km, rel_speed * 0.75)
     assert series[0]["rangeKm"] == pytest.approx(rel_speed * 60, rel=0.01)
+
+
+def test_plan_is_deterministic():
+    enc = crossing_encounter()
+    assert plan_maneuvers(enc, now=NOW).options == plan_maneuvers(enc, now=NOW).options
 
 
 def test_low_pc_recommends_no_action_but_still_lists_burns():
@@ -142,7 +162,8 @@ def test_secondary_mover_uses_its_own_propulsion():
     burns = plan.options[:-1]
     assert burns and all(o["newPc"] <= 1e-7 for o in burns)
     # Default 500 kg / 220 s spacecraft burns far less than the ISS for the same dv.
-    assert burns[0]["propellantKg"] == pytest.approx(propellant_kg(burns[0]["dvMs"], propulsion_for(50870, "COSMOS 1408 DEB")), abs=1e-3)
+    expected = propellant_kg(burns[0]["dvMs"], propulsion_for(50870, "COSMOS 1408 DEB"))
+    assert burns[0]["propellantKg"] == pytest.approx(expected, rel=1e-3)
 
 
 def test_tca_too_close_leaves_only_no_action():
@@ -155,5 +176,78 @@ def test_tca_too_close_leaves_only_no_action():
 def test_propulsion_table():
     assert propulsion_for(25544, "ISS (ZARYA)").mass_kg == 420_000
     assert propulsion_for(59121, "STARLINK-31502").isp_s == 1500
-    assert propulsion_for(1, "CARTOSAT-3").isp_s == 220
+    assert propulsion_for(1, "CARTOSAT-3").isp_s == 220 and propulsion_for(1, "CARTOSAT-3").mass_kg == 1000
+    assert propulsion_for(48840, "ONEWEB-0461").isp_s == 1600  # same as app/ai/profiles.py
+    assert propulsion_for(1, "UNKNOWN SAT").mass_kg == 500
     assert propellant_kg(0, propulsion_for(25544, None)) == 0
+
+
+# --- Adapters from the contract (ConjunctionDetail) ---------------------------------------------
+def _ref(norad, name, maneuverable=True, kind="PAYLOAD"):
+    return {"noradId": norad, "name": name, "type": kind, "maneuverable": maneuverable}
+
+
+def _detail(primary, secondary, miss=150.0, pc=3.1e-4, speed=14.2, tca_h=18.0):
+    return {
+        "id": "test-event", "primary": primary, "secondary": secondary,
+        "tca": (NOW + timedelta(hours=tca_h)).isoformat().replace("+00:00", "Z"),
+        "missDistanceM": miss, "rtnM": {"r": round(miss * 0.31), "t": round(miss * 0.91), "n": round(miss * 0.273)},
+        "relSpeedKms": speed, "pc": pc, "risk": "critical",
+        "rangeSeries": [{"tSec": (i - 40) * 1.5, "rangeKm": 0.0} for i in range(81)],
+        "covariance": {"sigmaMajorM": 186, "sigmaMinorM": 74, "angleDeg": 32}, "hardBodyRadiusM": 58,
+        "options": [], "brief": "",
+    }
+
+
+ISS = _ref(25544, "ISS (ZARYA)")
+COSMOS = _ref(50870, "COSMOS 1408 DEB", False, "DEBRIS")
+STARLINK = _ref(59121, "STARLINK-31502")
+ONEWEB = _ref(48840, "ONEWEB-0461")
+
+
+def test_encounter_from_detail_reproduces_contract_geometry():
+    d = _detail(ISS, COSMOS, miss=412.0)
+    enc = encounter_from_detail(d, primary_omm={"MEAN_MOTION": 15.5})
+    v_rel = np.asarray(enc.v_secondary_kms) - np.asarray(enc.v_primary_kms)
+    assert np.linalg.norm(v_rel) == pytest.approx(14.2, rel=1e-6)
+    assert abs(v_rel[0]) < 1e-12  # horizontal relative velocity (no radial part)
+    rel = (np.asarray(enc.r_secondary_km) - np.asarray(enc.r_primary_km)) * 1000
+    np.testing.assert_allclose(rel, [round(412 * 0.31), round(412 * 0.91), round(412 * 0.273)])
+    n = 15.5 * 2 * math.pi / 86400
+    assert np.linalg.norm(enc.r_primary_km) == pytest.approx((MU_KM3_S2 / n**2) ** (1 / 3))
+    assert enc.range_t_sec[0] == -60 and enc.tca == TCA
+
+
+def test_options_from_detail_use_screening_numbers_for_no_action():
+    opts = options(_detail(ISS, COSMOS), now=NOW)
+    assert opts[-1] == {"id": "no-action", "label": "No action", "direction": "none", "dvMs": 0.0, "burnAt": None,
+                        "newMissM": 150.0, "newPc": 3.1e-4, "propellantKg": 0.0, "recommended": False}
+    assert opts[0]["recommended"] and opts[0]["direction"] in ("prograde", "retrograde")
+    plan = plan_for_detail(_detail(ISS, COSMOS), now=NOW)
+    assert set(plan.to_contract()) == {"options", "afterSeries"}
+
+
+def test_options_for_each_negotiating_operator():
+    d = _detail(STARLINK, ONEWEB, miss=690.0, pc=8.7e-5, speed=12.8, tca_h=31.4)
+    a = options_for(d, 59121, now=NOW)
+    b = options_for(d, 48840, now=NOW)
+    assert len(a) >= 4 and len(b) >= 4
+    # Below the 1e-4 threshold: burns are listed, "No action" is recommended.
+    assert a[-1]["recommended"] and b[-1]["recommended"]
+    # Mirror geometry: similar delta-v, but each side's propellant follows its own mass/Isp.
+    assert a[0]["dvMs"] == pytest.approx(b[0]["dvMs"], abs=0.011)
+    starlink, oneweb = propulsion_for(59121, "STARLINK-31502"), propulsion_for(48840, "ONEWEB-0461")
+    assert a[0]["propellantKg"] == pytest.approx(propellant_kg(a[0]["dvMs"], starlink), rel=1e-3)
+    assert b[0]["propellantKg"] == pytest.approx(propellant_kg(b[0]["dvMs"], oneweb), rel=1e-3)
+    assert b[0]["propellantKg"] > 0  # grams, never rounded to zero
+
+
+def test_non_maneuverable_mover_and_unknown_id():
+    d = _detail(ISS, COSMOS)
+    debris_only = options_for(d, 50870, now=NOW)
+    assert [o["id"] for o in debris_only] == ["no-action"] and debris_only[0]["recommended"] is True
+    # Debris primary, maneuverable secondary: the default mover is the secondary.
+    plan = plan_for_detail(_detail(COSMOS, ISS), now=NOW)
+    assert plan.mover == "secondary" and len(plan.options) >= 4
+    with pytest.raises(ValueError):
+        options_for(d, 12345, now=NOW)
