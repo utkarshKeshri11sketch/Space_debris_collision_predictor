@@ -73,7 +73,10 @@ export function SelectedObject({
   });
   return (
     <>
-      {points.length > 1 && <line geometry={trail}><lineBasicMaterial color={object.type === 'DEBRIS' ? '#ff8a3d' : object.type === 'PAYLOAD' ? '#ff5d66' : '#b7c0d1'} transparent opacity={0.7} depthWrite={false} /></line>}
+      {points.length > 1 && (
+        // @ts-expect-error React Three Fiber renders <line> as THREE.Line; React's JSX types see the SVG <line>.
+        <line geometry={trail}><lineBasicMaterial color={object.type === 'DEBRIS' ? '#ff8a3d' : object.type === 'PAYLOAD' ? '#ff5d66' : '#b7c0d1'} transparent opacity={0.7} depthWrite={false} /></line>
+      )}
       <group ref={group}>
         <Billboard>
           <mesh><circleGeometry args={[0.19, 48]} /><meshBasicMaterial color={object.type === 'DEBRIS' ? '#ff8a3d' : object.type === 'PAYLOAD' ? '#ff5d66' : '#b7c0d1'} transparent opacity={0.055} depthTest={false} depthWrite={false} blending={AdditiveBlending} /></mesh>
