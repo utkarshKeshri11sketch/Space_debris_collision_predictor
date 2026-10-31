@@ -8,3 +8,4 @@ export const useConjunction = (id: string | undefined) => useQuery({ queryKey: [
 export const useCascade = () => useMutation({ mutationFn: (request: CascadeRequest) => api.cascade(request) });
 export const useCaseStudies = () => useQuery({ queryKey: ['case-studies'], queryFn: ({ signal }) => api.caseStudies(signal), staleTime: Infinity, retry: 1 });
 export const useCaseStudy = (id: string | undefined) => useQuery({ queryKey: ['case-study', id], queryFn: ({ signal }) => api.caseStudy(id ?? '', signal), enabled: Boolean(id), staleTime: Infinity, retry: 1 });
+export const useCollisionStudy = (id: string) => useQuery({ queryKey: ['collision-study', id], queryFn: ({ signal }) => api.collisionStudy(id, signal), staleTime: Infinity, retry: 1 });

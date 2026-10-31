@@ -69,3 +69,13 @@ and the frontend at `/conjunctions/<case id>` and `/negotiator/<case id>`.
 ## Lead: `GET /api/case-studies` and `GET /api/case-studies/{id}` → `CaseStudy` (see `app/models.py`)
 
 `status.physics` / `status.ai` say `pending` until each part is delivered; nothing is faked meanwhile.
+
+## Rewind 2009 (Cascade Lab): Iridium 33 x Cosmos 2251
+
+`GET /api/collision-studies` and `GET /api/collision-studies/case-2009-02-10-iridium33-cosmos2251` →
+`CollisionStudy` (`app/models.py`, `frontend/src/api/types.ts`). Built by Lead in `app/casestudy/collision.py`
+from sourced facts (Kelso 2009, Iridium's Shepperd 2023 replay, NASA's Liou 2013 counts) plus the same physics
+as live events: `maneuver.plan_maneuvers` for Iridium 33's avoidance burn on a reconstructed encounter, and
+`cascade.collision_fragment_yield` for the NASA breakup model. Pc over time is quoted from Iridium's replay,
+not computed. Frontend: `/cascade/rewind-2009`, linked from the Cascade Lab. After changing the study, run
+`python scripts/build_collision_fixture.py` from `backend/` so offline mode shows the same numbers.

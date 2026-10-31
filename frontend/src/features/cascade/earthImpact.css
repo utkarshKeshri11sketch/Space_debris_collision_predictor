@@ -1,6 +1,29 @@
 .cascade-view-tabs {
   margin: 0 0 20px;
 }
+.rewind-link {
+  display: grid;
+  gap: 3px;
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--debris);
+  background: var(--surface-1);
+  color: var(--text-2);
+  text-decoration: none;
+}
+.rewind-link:hover,
+.rewind-link:focus-visible {
+  border-color: var(--debris);
+}
+.rewind-link b {
+  color: var(--text-1);
+  font: 500 13px var(--font-body);
+}
+.rewind-link small {
+  font-size: 11px;
+  line-height: 1.4;
+}
 .earth-persistence {
   border: 1px solid var(--line);
   border-left: 3px solid var(--risk-watch);

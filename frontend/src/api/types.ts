@@ -121,3 +121,49 @@ export interface CaseStudy extends CaseStudySummary {
   assumptions: string[];
   status: { physics: 'ready' | 'pending' | 'error'; ai: 'ready' | 'pending' | 'error' };
 }
+/** Cascade Lab "Rewind 2009": a real collision, what avoiding it cost, and what the debris cost. */
+export interface CollisionStudy extends CaseStudySummary {
+  tca: string;
+  relSpeedKms: number;
+  objects: {
+    noradId: number;
+    name: string;
+    cospar: string;
+    status: string;
+    massKg: number;
+    maneuverable: boolean;
+  }[];
+  facts: (SourcedFact & { date: string })[];
+  aftermath: (SourcedFact & { date: string })[];
+  sources: { key: string; label: string; url: string }[];
+  causeBurns: { at: string; dvMs: number }[];
+  publicWarning: {
+    reports: number;
+    minMissM: number;
+    maxMissM: number;
+    finalMissM: number;
+    finalRank: number;
+    source: string;
+  };
+  pcThreshold: number;
+  sharedDataPc: { at: string; sharedPc: number; oneSidedPc: number }[];
+  pcSource: string;
+  orbitSentinel: {
+    moverNoradId: number;
+    planningAt: string;
+    pc: number;
+    massKg: number;
+    ispS: number;
+    maneuver: ManeuverOption;
+    causePropellantKg: number;
+  };
+  debris: {
+    altitudeKm: number;
+    modelFragments: number;
+    modelMethod: string;
+    counts: { date: string; catalogued: number; inOrbit: number | null; source: string }[];
+    knockOnConjunctionsPerWeek: number;
+    knockOnSource: string;
+  };
+  assumptions: string[];
+}

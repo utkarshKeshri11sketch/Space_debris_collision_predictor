@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useCascade, useCatalog } from '../../api/hooks';
 import type { CascadeResult } from '../../api/types';
 import { formatNumber } from '../../lib/format';
@@ -189,6 +189,11 @@ export default function CascadeScreen({ onResult, onYear }: Props) {
         <p className="feature-description">
           Explore how a single event reshapes the orbital environment.
         </p>
+        <Link className="rewind-link" to="/cascade/rewind-2009">
+          <span className="eyebrow">Case study · Rewind 2009</span>
+          <b>A real collision: Iridium 33 × Cosmos 2251</b>
+          <small>Why it happened, what avoiding it would have cost, and the debris it left</small>
+        </Link>
         {whatIfFrom && parent?.noradId === whatIfNorad && (
           <div className="what-if-banner" role="status">
             <b>What if it hits?</b> Simulating the collision that breaks up {parent.name}, from a

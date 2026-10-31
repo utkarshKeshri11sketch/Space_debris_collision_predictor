@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import warmup
-from .routers import ask, case_studies, cascade, catalog, conjunctions, negotiations
+from .routers import ask, case_studies, cascade, catalog, collision_studies, conjunctions, negotiations
 
 
 @asynccontextmanager
@@ -52,5 +52,5 @@ def health():
     return {"status": "ok"}
 
 
-for module in (catalog, conjunctions, negotiations, cascade, ask, case_studies):
+for module in (catalog, conjunctions, negotiations, cascade, ask, case_studies, collision_studies):
     app.include_router(module.router)

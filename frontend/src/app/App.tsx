@@ -19,6 +19,7 @@ const NegotiatorScreen = lazy(() => import('../features/negotiator/NegotiatorScr
 const CascadeScreen = lazy(() => import('../features/cascade/CascadeScreen'));
 const AlertScreen = lazy(() => import('../features/conjunction/AlertScreen'));
 const CaseStudyScreen = lazy(() => import('../features/case-study/CaseStudyScreen'));
+const CollisionStudyScreen = lazy(() => import('../features/case-study/CollisionStudyScreen'));
 const speeds = [1, 60, 600, 3600];
 // Backend Ask Sentinel refusals (app/ai/ask.py OFF_TOPIC / NOT_IN_RUN).
 const REFUSAL = /^(I can only help with|That isn't in the current screening run)/;
@@ -59,15 +60,18 @@ export default function App() {
       !sessionStorage.getItem('orbit-intro') &&
       !matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
-  const mode = location.pathname.startsWith('/case-study')
-    ? 'casestudy'
-    : location.pathname.startsWith('/cascade')
-      ? 'cascade'
-      : location.pathname.startsWith('/negotiator')
-        ? 'negotiator'
-        : location.pathname.startsWith('/conjunctions') || location.pathname.startsWith('/alert')
-          ? 'conjunction'
-          : 'mission';
+  // The Cascade Lab's case study opens over the scene like Rewind 2021, under the Cascade Lab tab.
+  const rewind2009 = location.pathname.startsWith('/cascade/rewind-2009');
+  const mode =
+    location.pathname.startsWith('/case-study') || rewind2009
+      ? 'casestudy'
+      : location.pathname.startsWith('/cascade')
+        ? 'cascade'
+        : location.pathname.startsWith('/negotiator')
+          ? 'negotiator'
+          : location.pathname.startsWith('/conjunctions') || location.pathname.startsWith('/alert')
+            ? 'conjunction'
+            : 'mission';
   const eventId =
     location.pathname.split('/')[2] || (mode === 'negotiator' ? 'starlink-oneweb' : 'iss-cosmos');
   const threats = useConjunctions();
@@ -267,7 +271,9 @@ export default function App() {
               {mode === 'mission'
                 ? 'Orbital overview'
                 : mode === 'casestudy'
-                  ? 'Rewind 2021'
+                  ? rewind2009
+                    ? 'Rewind 2009'
+                    : 'Rewind 2021'
                   : mode === 'cascade'
                     ? 'Cascade simulation'
                     : mode === 'negotiator'
@@ -408,7 +414,10 @@ export default function App() {
               />
             )}
             {mode === 'cascade' && <CascadeScreen onResult={setCascade} onYear={setCascadeYear} />}
-            {mode === 'casestudy' && (
+            {mode === 'casestudy' && rewind2009 && (
+              <CollisionStudyScreen onCascade={() => navigate('/cascade')} />
+            )}
+            {mode === 'casestudy' && !rewind2009 && (
               <CaseStudyScreen
                 caseId={location.pathname.split('/')[2] || undefined}
                 onSelect={(id) => navigate(`/case-study/${id}`)}
@@ -792,7 +801,12 @@ function MissionMetrics({ threats }: { threats: Conjunction[] | undefined }) {
         { label: 'CLOSE APPROACHES', value: <Ticker value={threats?.length} />, unit: '/ 7 days' },
         {
           label: 'HIGH + CRITICAL',
-          value: <Ticker value={threats?.filter((c) => c.risk !== 'watch').length} format={n => Math.round(n).toString().padStart(2, '0')} />,
+          value: (
+            <Ticker
+              value={threats?.filter((c) => c.risk !== 'watch').length}
+              format={(n) => Math.round(n).toString().padStart(2, '0')}
+            />
+          ),
           unit: 'events',
           warn: true,
         },

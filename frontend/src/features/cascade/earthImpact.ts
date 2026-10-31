@@ -18,7 +18,10 @@ export function meanAltitudeKm(omm: Record<string, string | number>): number {
 // - Cosmos 1408 (~480 km, Nov 2021): 1,122 of 1,783 tracked fragments had decayed by Aug 2022, about
 //   9 months later (SpaceNews, 2022) → τ = 0.75 / −ln(661 / 1783) ≈ 0.76 years.
 // - Fengyun-1C (~865 km, Jan 2007): NASA projects about half of the fragments still in orbit in 2033,
-//   26 years after the breakup (Liou, NASA NTRS 20150003820) → τ = 26 / ln 2 ≈ 37.5 years.
+//   26 years after the breakup (Liou, NASA NTRS 20150003820) → τ = 26 / ln 2 ≈ 37.5 years. The same
+//   report counts 3,076 of 3,378 still in orbit after 6 years (τ ≈ 64 years if fitted on that); the
+//   projection is used because it spans the decades the Lab shows. Check: the same fit keeps 80% of
+//   Iridium 33 / Cosmos 2251 fragments (789 km) after 4 years, against 1,821 of 2,201 (83%) in NASA's count.
 // Fragments have a high area-to-mass ratio, so they decay faster than intact spacecraft, which ESA
 // puts at ~100–150 years from 800 km. Solar-cycle and thermosphere changes are ignored here.
 const LOW_ANCHOR = { altKm: 480, tauYears: 0.75 / -Math.log(661 / 1783) };

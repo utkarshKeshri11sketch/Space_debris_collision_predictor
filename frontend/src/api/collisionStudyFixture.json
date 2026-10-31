@@ -1,0 +1,214 @@
+{
+ "id": "case-2009-02-10-iridium33-cosmos2251",
+ "title": "Iridium 33 x Cosmos 2251",
+ "date": "2009-02-10",
+ "tca": "2009-02-10T16:55:59.820Z",
+ "relSpeedKms": 11.6,
+ "objects": [
+  {
+   "noradId": 24946,
+   "name": "IRIDIUM 33",
+   "cospar": "1997-051C",
+   "status": "operational, hydrazine thrusters",
+   "massKg": 556.0,
+   "maneuverable": true
+  },
+  {
+   "noradId": 22675,
+   "name": "COSMOS 2251",
+   "cospar": "1993-036A",
+   "status": "defunct since about 1995",
+   "massKg": 900.0,
+   "maneuverable": false
+  }
+ ],
+ "facts": [
+  {
+   "text": "From 4 February, all 14 reports of the free SOCRATES screening (public TLE data) predicted an Iridium 33 x Cosmos 2251 approach at the collision time, between 117 m and 1.8 km. None made its Top Ten.",
+   "source": "kelso",
+   "date": "2009-02-04"
+  },
+  {
+   "text": "Iridium 33 had 10 to 15 predicted approaches within 5 km every week. With TLE data, this one could not be told apart from the rest.",
+   "source": "kelso",
+   "date": "2009-02-04"
+  },
+  {
+   "text": "Iridium planned a routine station-keeping maneuver for Iridium 33.",
+   "source": "shepperd",
+   "date": "2009-02-09"
+  },
+  {
+   "text": "At 07:10 and 08:00 UTC, two hydrazine burns of 0.0022 m/s raised its orbit by 8.3 m, onto Cosmos 2251's path. Iridium could not see the military's precise catalog; the military did not know about the burn.",
+   "source": "shepperd",
+   "date": "2009-02-10"
+  },
+  {
+   "text": "The last SOCRATES report, at 15:02 UTC, predicted a 584 m miss and ranked the approach 152nd.",
+   "source": "kelso",
+   "date": "2009-02-10"
+  },
+  {
+   "text": "At 16:55:59.8 UTC, Iridium 33 (operational) and Cosmos 2251 (defunct since about 1995) collided at 11.6 km/s over Siberia. Both were destroyed.",
+   "source": "shepperd",
+   "date": "2009-02-10"
+  }
+ ],
+ "aftermath": [
+  {
+   "text": "Iridium and the US military agreed to share data: Iridium sends planned maneuvers, the military returns daily screenings with covariance.",
+   "source": "shepperd",
+   "date": "2009-04"
+  },
+  {
+   "text": "In one week the debris produced 629 predicted approaches within 5 km with Iridium and Orbcomm satellites.",
+   "source": "kelso",
+   "date": "2009-08-05"
+  },
+  {
+   "text": "US military screening grew from about 120 to about 1,150 active satellites.",
+   "source": "jspoc",
+   "date": "2009-12-18"
+  },
+  {
+   "text": "The International Space Station changed its orbit to avoid a piece of Iridium 33 debris.",
+   "source": "iss_2012",
+   "date": "2012-10-31"
+  },
+  {
+   "text": "NASA: 2,201 fragments catalogued from the collision, 1,821 still in orbit.",
+   "source": "liou",
+   "date": "2013-01"
+  },
+  {
+   "text": "Iridium replayed the archived data: merged, it showed the risk days ahead. In its words, \"no one shared their bucket\".",
+   "source": "shepperd",
+   "date": "2023"
+  }
+ ],
+ "sources": [
+  {
+   "key": "kelso",
+   "label": "T.S. Kelso, Analysis of the Iridium 33-Cosmos 2251 Collision (AMOS 2009)",
+   "url": "https://www.agi.com/getmedia/ae99817a-8218-4c21-85d7-bcde2583b20f/Analysis-of-the-Iridium-33-Cosmos-2251-Collision.pdf"
+  },
+  {
+   "key": "shepperd",
+   "label": "R. Shepperd (Iridium), Subsequent Assessment of the Collision between Iridium 33 and COSMOS 2251 (AMOS 2023)",
+   "url": "https://amostech.com/TechnicalPapers/2023/Conjunction-RPO/Shepperd.pdf"
+  },
+  {
+   "key": "liou",
+   "label": "J.-C. Liou, An Analysis of the FY-1C, Iridium 33, and Cosmos 2251 Fragments (NASA, 2013)",
+   "url": "https://ntrs.nasa.gov/citations/20150003820"
+  },
+  {
+   "key": "jspoc",
+   "label": "US Air Force: JFCC Space achieves flight safety milestone (Dec 2009)",
+   "url": "https://www.vandenberg.spaceforce.mil/News/Article-Display/Article/339957/jfcc-space-achieves-flight-safety-milestone/"
+  },
+  {
+   "key": "iss_2012",
+   "label": "SpacePolicyOnline: ISS swerves to avoid Iridium debris (31 Oct 2012)",
+   "url": "https://spacepolicyonline.com/news/iss-swerves-to-avoid-iridium-debris-readies-for-spacewalk-update"
+  },
+  {
+   "key": "wiki",
+   "label": "Wikipedia: 2009 satellite collision",
+   "url": "https://en.wikipedia.org/wiki/2009_satellite_collision"
+  }
+ ],
+ "causeBurns": [
+  {
+   "at": "2009-02-10T07:10:33.195Z",
+   "dvMs": 0.0021685
+  },
+  {
+   "at": "2009-02-10T08:00:47.190Z",
+   "dvMs": 0.0021685
+  }
+ ],
+ "publicWarning": {
+  "reports": 14,
+  "minMissM": 117.0,
+  "maxMissM": 1812.0,
+  "finalMissM": 584.0,
+  "finalRank": 152,
+  "source": "kelso"
+ },
+ "pcThreshold": 0.0001,
+ "sharedDataPc": [
+  {
+   "at": "2009-02-07T20:00:00Z",
+   "sharedPc": 0.00025,
+   "oneSidedPc": 1.2e-23
+  },
+  {
+   "at": "2009-02-08T20:00:00Z",
+   "sharedPc": 0.0012,
+   "oneSidedPc": 9.5e-27
+  },
+  {
+   "at": "2009-02-09T20:00:00Z",
+   "sharedPc": 0.033,
+   "oneSidedPc": 2.6e-51
+  },
+  {
+   "at": "2009-02-10T15:40:00Z",
+   "sharedPc": 0.078,
+   "oneSidedPc": 0.00049
+  }
+ ],
+ "pcSource": "shepperd",
+ "orbitSentinel": {
+  "moverNoradId": 24946,
+  "planningAt": "2009-02-09T20:00:00.000Z",
+  "pc": 0.0242,
+  "massKg": 556.0,
+  "ispS": 220.0,
+  "maneuver": {
+   "id": "option-a",
+   "label": "0.03 m/s prograde, 6 h before",
+   "direction": "prograde",
+   "dvMs": 0.03,
+   "burnAt": "2009-02-10T11:03:45.047Z",
+   "newMissM": 1202.0,
+   "newPc": 7.33e-11,
+   "propellantKg": 0.007731,
+   "recommended": true
+  },
+  "causePropellantKg": 0.001118
+ },
+ "debris": {
+  "altitudeKm": 789.0,
+  "modelFragments": 1209,
+  "modelMethod": "NASA standard breakup model, fragments >= 10 cm",
+  "counts": [
+   {
+    "date": "2009-08-26",
+    "catalogued": 1366,
+    "inOrbit": 1318,
+    "source": "kelso"
+   },
+   {
+    "date": "2013-01",
+    "catalogued": 2201,
+    "inOrbit": 1821,
+    "source": "liou"
+   }
+  ],
+  "knockOnConjunctionsPerWeek": 629,
+  "knockOnSource": "kelso"
+ },
+ "assumptions": [
+  "Encounter reconstructed from published values, not from historical element sets: circular orbits at 789 km (Wikipedia), inclinations 86 and 74 deg (Kelso, Table 1), crossing chosen for the published 11.6 km/s relative speed (model: 11.59 km/s).",
+  "They collided, so the predicted miss on the planned trajectory is modelled as 0 m (a direct hit).",
+  "Covariance: Iridium 33 uses Iridium's own conservative model, R/T/N = 20 / 120*dt+60 / 20 m (Shepperd), (20, 165, 20) m at 0.87 days; Cosmos 2251 (30.0, 300.0, 50.0) m (not published; assumption). Combined in the encounter plane: 219 x 36 m.",
+  "Hard-body radius 19.9 m: Iridium 33 3.942 m + Cosmos 2251 16 m, as in Iridium's replay (Shepperd).",
+  "Planning time 09 Feb 20:00 UTC, the day the station-keeping burn was planned (Shepperd). Policy as for live events: burn when Pc >= 0.0001, target Pc <= 1e-07 and miss >= 1000 m (app.physics.maneuver).",
+  "Iridium 33: 556 kg dry mass (Kelso, Table 1; propellant left in 2009 is unknown, so this is a lower bound) and hydrazine thrusters (Shepperd) at an assumed Isp of 220 s.",
+  "The burn is rounded up to the planner's 0.01 m/s grid, so the real minimum may be smaller.",
+  "Debris model: NASA standard breakup model for a catastrophic collision of 556 + 900 kg at 11.6 km/s, fragments >= 10 cm (app.physics.cascade).",
+  "Pc over time is quoted from Iridium's replay (Shepperd, Table 2, Foster method), not computed here. The 10 Feb one-sided value used knowledge of Iridium's burn to shorten the orbit fit."
+ ]
+}

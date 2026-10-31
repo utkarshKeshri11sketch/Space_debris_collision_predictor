@@ -261,3 +261,83 @@ class CaseStudy(BaseModel):
     comparison: IncidentComparison | None
     assumptions: list[str]
     status: CaseStudyStatus
+
+
+# ---- Collision case study (Cascade Lab "Rewind 2009"): a real collision, why it was not avoided,
+# what avoiding it would have cost, and what the debris cost. See app/casestudy/collision.py. ----
+class CollisionObject(BaseModel):
+    noradId: int
+    name: str
+    cospar: str
+    status: str  # e.g. "operational, hydrazine thrusters" / "defunct since ~1995"
+    massKg: float
+    maneuverable: bool
+
+
+class TimedBurn(BaseModel):
+    at: str  # ISO 8601 UTC
+    dvMs: float
+
+
+class PublicWarning(BaseModel):
+    """What the free public screening (TLE-based) showed before the collision."""
+    reports: int
+    minMissM: float
+    maxMissM: float
+    finalMissM: float
+    finalRank: int
+    source: str
+
+
+class PcPoint(BaseModel):
+    """Pc of the conjunction as screened at `at`, replayed from archived data."""
+    at: str
+    sharedPc: float  # operator orbit + maneuver plan merged with the military catalog
+    oneSidedPc: float  # military catalog data alone
+
+
+class CollisionDecision(BaseModel):
+    """OrbitSentinel's planner on the reconstructed encounter: who moves and the burn."""
+    moverNoradId: int
+    planningAt: str
+    pc: float  # OrbitSentinel's Pc on the reconstruction, before the burn
+    massKg: float
+    ispS: float
+    maneuver: ManeuverOption
+    causePropellantKg: float  # propellant of the station-keeping burns that set up the collision
+
+
+class CatalogCount(BaseModel):
+    date: str
+    catalogued: int
+    inOrbit: int | None
+    source: str
+
+
+class CollisionDebris(BaseModel):
+    altitudeKm: float
+    modelFragments: int  # NASA standard breakup model, fragments >= 10 cm
+    modelMethod: str
+    counts: list[CatalogCount]
+    knockOnConjunctionsPerWeek: int
+    knockOnSource: str
+
+
+class CollisionStudy(BaseModel):
+    id: str
+    title: str
+    date: str
+    tca: str
+    relSpeedKms: float
+    objects: list[CollisionObject]
+    facts: list[DatedFact]
+    aftermath: list[DatedFact]
+    sources: list[Source]
+    causeBurns: list[TimedBurn]
+    publicWarning: PublicWarning
+    pcThreshold: float
+    sharedDataPc: list[PcPoint]
+    pcSource: str
+    orbitSentinel: CollisionDecision
+    debris: CollisionDebris
+    assumptions: list[str]
