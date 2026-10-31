@@ -56,8 +56,10 @@ All four areas are merged into `main` and the routers call the real code. No moc
 | `POST /api/ask` (SSE) | `routers/ask.py` | `ai.ask_stream(question, {conjunctions, catalogMeta})` |
 
 Real-data decisions (Lead):
-- **Catalog**: CelesTrak GP (active + DEB + R/B), refreshed by `python -m app.data.refresh`; until a
-  refresh succeeds the bundled July 2025 archive is served (Screening refuses it as too old).
+- **Catalog**: Space-Track GP (all on-orbit objects) when `SPACETRACK_USERNAME`/`PASSWORD` are set in
+  `backend/.env`, else CelesTrak GP (active + DEB + R/B); refreshed by `python -m app.data.refresh`. Until a
+  refresh succeeds the bundled July 2025 archive is served (Screening refuses it as too old). Space-Track
+  has no operational status: only propulsive-fleet payloads count as active (`app/data/spacetrack.py`).
 - **Maneuverable** = active payload of a propulsive fleet (Starlink, OneWeb, Kuiper, ISS, Tianhe) or
   listed in `CATALOG_MANEUVERABLE_IDS`. An assumption, not operator-verified.
 - **Watch-list** = ISS + the closest real cross-operator maneuverable pair from CelesTrak SOCRATES.
@@ -76,7 +78,7 @@ cd backend
 python -m pip install -r requirements.txt
 cp .env.example .env              # optional
 python -m uvicorn app.main:app --reload --port 8000
-python -m app.data.refresh       # download the live CelesTrak catalog + SOCRATES (max once / 2 h)
+python -m app.data.refresh       # download the live catalog: Space-Track, or CelesTrak + SOCRATES (max once / 2 h)
 python -m pytest -q               # all areas: data, screening, physics, ai, API contract
 bash scripts/check.sh             # starts a server, hits every endpoint, validates against models.py
 ```

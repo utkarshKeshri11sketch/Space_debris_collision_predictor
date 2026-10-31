@@ -192,15 +192,16 @@ export interface BandSatellite {
 }
 
 /**
- * The bundled archive snapshot has no active roster, so every object reads inactive. Counts of active
- * satellites, and the cascade's at-risk and extra-approach figures (weighted by active payloads), are
- * then unknown rather than zero.
+ * The bundled archive snapshot has no active roster, so every object reads inactive; a Space-Track
+ * catalog marks only propulsive-fleet payloads active and says other statuses are unknown. Counts of
+ * active satellites, and the cascade's at-risk and extra-approach figures (weighted by active
+ * payloads), are then unknown rather than zero or an undercount.
  */
-export function activityKnown(catalog: CatalogObject[] | undefined): boolean {
-  return Boolean(catalog?.some((object) => object.active));
+export function activityKnown(catalog: CatalogObject[] | undefined, source = ''): boolean {
+  return !/status unknown/i.test(source) && Boolean(catalog?.some((object) => object.active));
 }
 export const ACTIVITY_UNKNOWN =
-  'This catalog does not record which satellites are active, so they cannot be counted. Refresh to the live CelesTrak catalog for these figures.';
+  'This catalog does not record which satellites are active, so they cannot be counted or weighed for risk here.';
 
 /** Real active payloads from the loaded catalog within the cloud's altitude band. */
 export function satellitesInBand(catalog: CatalogObject[], altKm: number) {

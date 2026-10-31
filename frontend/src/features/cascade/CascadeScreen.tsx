@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useCascade, useCatalog } from '../../api/hooks';
+import { useCascade, useCatalog, useCatalogMeta } from '../../api/hooks';
 import type { CascadeResult } from '../../api/types';
 import { formatNumber } from '../../lib/format';
 import { EarthImpactPanel, PreparednessPanel } from './EarthImpactPanels';
@@ -82,7 +82,8 @@ function GrowthChart({ result, year }: { result: CascadeResult; year: number }) 
 
 export default function CascadeScreen({ onResult, onYear }: Props) {
   const catalog = useCatalog();
-  const known = activityKnown(catalog.data);
+  const meta = useCatalogMeta();
+  const known = activityKnown(catalog.data, meta.data?.source);
   const simulation = useCascade();
   // "What if this one hits?" from a conjunction: /cascade?norad=<primary>&from=<conjunction id>
   const [params] = useSearchParams();

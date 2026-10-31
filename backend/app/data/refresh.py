@@ -1,7 +1,10 @@
-"""Explicit CelesTrak refresh and EventBridge Lambda entry point.
+"""Explicit catalog refresh (Space-Track or CelesTrak) and EventBridge Lambda entry point.
 
 Never imported or called by the catalog router. An attempt (including failure)
 consumes the two-hour window. A conditional S3 lease coordinates cold starts.
+CATALOG_SOURCE picks the upstream; it defaults to Space-Track when its credentials
+are set. Each source keeps its own cooldown/block state, and the Space-Track path
+never contacts CelesTrak (catalog or SOCRATES).
 """
 from __future__ import annotations
 
@@ -20,7 +23,7 @@ from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from . import storage
+from . import spacetrack, storage
 from .catalog import normalize_omm, parse_record, utc_datetime
 from .storage import MAX_SNAPSHOT_BYTES, Settings, Snapshot, atomic_write, parse_snapshot, read_snapshot
 
@@ -30,6 +33,7 @@ DEFAULT_URLS = (BASE_URL + "?GROUP=active&FORMAT=JSON",
                 BASE_URL + "?NAME=DEB&FORMAT=JSON",
                 BASE_URL + "?NAME=R%2FB&FORMAT=JSON")
 SATCAT_URL = "https://celestrak.org/pub/satcat.csv"
+LOGIN_RETRY_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,21 @@ def _download(url: str) -> bytes:
     if len(payload) > MAX_SNAPSHOT_BYTES:
         raise ValueError("CelesTrak response too large")
     return payload
+
+
+def source() -> str:
+    """'spacetrack' or 'celestrak'. Unset: Space-Track when its credentials exist."""
+    chosen = os.environ.get("CATALOG_SOURCE", "").strip().lower()
+    if not chosen:
+        return "spacetrack" if spacetrack.credentials() else "celestrak"
+    if chosen not in ("spacetrack", "celestrak"):
+        raise ValueError("CATALOG_SOURCE must be spacetrack or celestrak")
+    return chosen
+
+
+def _state_suffix(name: str) -> str:
+    # CelesTrak keeps the original file names, so existing cooldowns/blocks still apply to it.
+    return ".refresh.json" if name == "celestrak" else f".{name}.refresh.json"
 
 
 def _urls() -> tuple[str, ...]:
@@ -140,9 +159,9 @@ def _save_state(path: Path, state: dict) -> None:
     atomic_write(path, json.dumps(state, allow_nan=False).encode("utf-8"))
 
 
-def _s3_state(client, settings: Settings) -> tuple[dict, str | None]:
+def _s3_state(client, settings: Settings, suffix: str = ".refresh.json") -> tuple[dict, str | None]:
     try:
-        response = client.get_object(Bucket=settings.bucket, Key=settings.key + ".refresh.json")
+        response = client.get_object(Bucket=settings.bucket, Key=settings.key + suffix)
     except Exception as exc:
         code = getattr(exc, "response", {}).get("Error", {}).get("Code")
         # AccessDenied/credential/network errors MUST NOT be treated as no lease.
@@ -161,9 +180,9 @@ def _s3_state(client, settings: Settings) -> tuple[dict, str | None]:
     return state, response["ETag"]
 
 
-def _put_s3_state(client, settings: Settings, state: dict, etag: str | None):
+def _put_s3_state(client, settings: Settings, state: dict, etag: str | None, suffix: str = ".refresh.json"):
     condition = {"IfMatch": etag} if etag else {"IfNoneMatch": "*"}
-    return client.put_object(Bucket=settings.bucket, Key=settings.key + ".refresh.json",
+    return client.put_object(Bucket=settings.bucket, Key=settings.key + suffix,
                              Body=json.dumps(state).encode(), ContentType="application/json", **condition)
 
 
@@ -187,6 +206,12 @@ def fetch_catalog() -> RefreshResult:
     """
     settings = Settings.from_env()
     now = time.time()
+    try:
+        name = source()
+    except ValueError as exc:
+        return RefreshResult("error", message=str(exc))
+    suffix = _state_suffix(name)
+    state_path = settings.cache_path.with_suffix(settings.cache_path.suffix + suffix)
     settings.lock_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         descriptor = os.open(settings.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -205,7 +230,7 @@ def fetch_catalog() -> RefreshResult:
     state = {}
     attempted = False
     try:
-        state = _read_state(settings.state_path)
+        state = _read_state(state_path)
         if state.get("blocked") or now < state.get("nextAllowedAt", 0):
             return RefreshResult("skipped", message="Refresh cooldown or upstream block is active")
         # A restored snapshot also guards against an absent/deleted state file.
@@ -217,19 +242,19 @@ def fetch_catalog() -> RefreshResult:
             return RefreshResult("skipped", len(cached.records), cached.synced_at, "Snapshot is under two hours old")
         if settings.bucket:
             client = storage.s3_client()
-            remote, remote_etag = _s3_state(client, settings)
+            remote, remote_etag = _s3_state(client, settings, suffix)
             if remote.get("blocked") or now < remote.get("nextAllowedAt", 0):
-                _save_state(settings.state_path, remote)
+                _save_state(state_path, remote)
                 return RefreshResult("skipped", message="Shared S3 cooldown or upstream block is active")
         state = {"attemptedAt": now, "nextAllowedAt": now + max(7200, settings.min_refresh_seconds)}
         # Save locally before the conditional claim. Competing writers that lose
         # the S3 condition do not fall back to an uncoordinated HTTP request.
-        _save_state(settings.state_path, state)
+        _save_state(state_path, state)
         if client is not None:
-            response = _put_s3_state(client, settings, state, remote_etag)
+            response = _put_s3_state(client, settings, state, remote_etag, suffix)
             remote_etag = response["ETag"]
         attempted = True
-        snapshot = _download_catalog(now, cached)
+        snapshot = spacetrack.download_snapshot(now) if name == "spacetrack" else _download_catalog(now, cached)
         payload = snapshot.to_bytes()
         # Validate the serialized artifact too, before replacing either cache.
         parse_snapshot(payload)
@@ -244,15 +269,20 @@ def fetch_catalog() -> RefreshResult:
         if isinstance(exc, HTTPError):
             state["nextAllowedAt"] = max(state.get("nextAllowedAt", now + 7200), _retry_after(exc, now))
             state["blocked"] = exc.code in (301, 302, 307, 308, 403, 404)
+        if isinstance(exc, spacetrack.SpaceTrackLoginError):
+            # Fixing .env should not cost two hours; 5 minutes still keeps failed logins rare.
+            state["nextAllowedAt"] = now + LOGIN_RETRY_SECONDS
         if attempted:
             state["lastError"] = type(exc).__name__
             try:
-                _save_state(settings.state_path, state)
+                _save_state(state_path, state)
                 if client is not None:
-                    _put_s3_state(client, settings, state, remote_etag)
+                    _put_s3_state(client, settings, state, remote_etag, suffix)
             except Exception:
                 LOG.exception("Cannot persist refresh failure; original cooldown lease remains")
         LOG.warning("Catalog refresh failed; last good caches retained: %s", exc)
+        if isinstance(exc, spacetrack.SpaceTrackLoginError):
+            return RefreshResult("error", message=str(exc))
         return RefreshResult("error", message=f"Catalog refresh failed: {type(exc).__name__}; consult logs")
     finally:
         settings.lock_path.unlink(missing_ok=True)
@@ -270,12 +300,29 @@ def _refresh_watchlist() -> None:
     """SOCRATES candidates for the screening watch-list; failure keeps the previous list."""
     from .watchlist import refresh_socrates
     try:
+        if source() == "spacetrack":
+            # SOCRATES is CelesTrak; the cached candidate list (if any) stays in use.
+            LOG.info("SOCRATES skipped: CelesTrak is not used with CATALOG_SOURCE=spacetrack")
+            return
         LOG.info("SOCRATES watch-list candidates: %s", refresh_socrates())
     except Exception as exc:  # noqa: BLE001 - a stale watch-list must not fail the catalog refresh
         LOG.warning("SOCRATES refresh failed; keeping previous watch-list: %s", exc)
 
 
+def load_dotenv(path: Path = Path(__file__).resolve().parents[2] / ".env") -> None:
+    """KEY=VALUE lines from backend/.env for the command line; real environment variables win."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        key, sep, value = line.strip().partition("=")
+        if sep and key and not key.startswith("#"):
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    load_dotenv()
+    print(f"Catalog source: {source()}")
     result = fetch_catalog()
     _refresh_watchlist()
     print(json.dumps(asdict(result)))

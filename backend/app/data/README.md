@@ -33,6 +33,10 @@ IDs. Native propagation is checked at the actual element epoch, not today's date
 
 ## Refresh and deployment
 
+Source: with `SPACETRACK_USERNAME` and `SPACETRACK_PASSWORD` set (backend/.env or the
+environment) the refresh uses Space-Track.org and never contacts CelesTrak; `CATALOG_SOURCE`
+forces `spacetrack` or `celestrak`. Each source has its own cooldown/block state file.
+
 From `backend/`, after installing the existing `requirements.txt`:
 
 ```sh

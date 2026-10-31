@@ -139,6 +139,9 @@ describe('cascade Earth-impact model', () => {
     };
     expect(activityKnown([{ ...object, active: false }])).toBe(false);
     expect(activityKnown([{ ...object, active: true }])).toBe(true);
+    // Space-Track: only fleet payloads are marked active, so counts would undercount.
+    const spaceTrack = 'Space-Track.org GP; operational status unknown outside propulsive fleets';
+    expect(activityKnown([{ ...object, active: true }], spaceTrack)).toBe(false);
     const result = cascade(840);
     const impact = earthImpact(result, 10);
     const titles = [

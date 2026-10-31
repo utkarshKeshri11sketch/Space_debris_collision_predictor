@@ -24,7 +24,8 @@ LOG = logging.getLogger(__name__)
 OBJECT_TYPES = ("PAYLOAD", "DEBRIS", "ROCKET_BODY", "UNKNOWN")
 TYPE_MAP = {"PAY": "PAYLOAD", "PAYLOAD": "PAYLOAD", "DEB": "DEBRIS",
             "DEBRIS": "DEBRIS", "R/B": "ROCKET_BODY", "ROCKET BODY": "ROCKET_BODY",
-            "ROCKET_BODY": "ROCKET_BODY", "UNK": "UNKNOWN", "UNKNOWN": "UNKNOWN"}
+            "ROCKET_BODY": "ROCKET_BODY", "UNK": "UNKNOWN", "UNKNOWN": "UNKNOWN",
+            "TBA": "UNKNOWN"}  # Space-Track: type not yet assigned
 ACTIVE_STATUSES = frozenset({"+", "P", "B", "S", "X"})
 # ASSUMPTION (Lead): active payloads of these fleets are treated as maneuverable. Each fleet
 # publicly flies onboard propulsion and routinely performs collision avoidance (SpaceX/OneWeb/

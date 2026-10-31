@@ -71,7 +71,7 @@ class RefreshTests(unittest.TestCase):
         storage.atomic_write(self.bundle, self.old.to_bytes())
         patches = [patch.dict(os.environ, {"CATALOG_CACHE_PATH": str(self.path), "S3_BUCKET": "",
                    "CATALOG_S3_KEY": "catalog.json", "CATALOG_MIN_REFRESH_SECONDS": "1",
-                   "CATALOG_MANEUVERABLE_IDS": "", "CELESTRAK_URL": ""}),
+                   "CATALOG_MANEUVERABLE_IDS": "", "CELESTRAK_URL": "", "CATALOG_SOURCE": "celestrak"}),
                    patch.object(storage, "BUNDLED_SNAPSHOT", self.bundle),
                    patch.object(refresh.time, "time", return_value=NOW)]
         for active_patch in patches:

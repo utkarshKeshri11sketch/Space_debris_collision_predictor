@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useCatalog } from '../../api/hooks';
+import { useCatalog, useCatalogMeta } from '../../api/hooks';
 import type { CascadeResult } from '../../api/types';
 import { formatNumber } from '../../lib/format';
 import {
@@ -170,9 +170,10 @@ export function EarthImpactPanel({ result, year }: { result: CascadeResult; year
 
 function BandSatellites({ altKm }: { altKm: number }) {
   const catalog = useCatalog();
+  const meta = useCatalogMeta();
   const band = useMemo(() => satellitesInBand(catalog.data ?? [], altKm), [catalog.data, altKm]);
   if (!catalog.data) return null;
-  if (!activityKnown(catalog.data))
+  if (!activityKnown(catalog.data, meta.data?.source))
     return (
       <section className="feature-section">
         <div className="feature-subheading">
@@ -215,7 +216,8 @@ function BandSatellites({ altKm }: { altKm: number }) {
 
 export function PreparednessPanel({ result, year }: { result: CascadeResult; year: number }) {
   const catalog = useCatalog();
-  const known = activityKnown(catalog.data);
+  const meta = useCatalogMeta();
+  const known = activityKnown(catalog.data, meta.data?.source);
   const impact = earthImpact(result, year);
   const actions = preparednessActions(result, impact, year, known);
   const steps = aiTimeline(result, impact, known);
