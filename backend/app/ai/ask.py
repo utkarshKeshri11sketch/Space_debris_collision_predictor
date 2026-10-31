@@ -5,7 +5,8 @@
 
 `context` (JSON-shaped, frontend camelCase):
     {"conjunctions": [<Conjunction|ConjunctionDetail>, ...],   # detail objects carry `options`
-     "cascade": <CascadeResult>?, "catalogMeta": <CatalogMeta>?}
+     "cascade": <CascadeResult>?, "catalogMeta": <CatalogMeta>?,
+     "screeningUnavailable": <reason>?}                   # set when screening could not run
 
 Safety: the question is untrusted text. Off-topic questions are refused politely without a model call;
 on-topic ones go to the model inside a delimited block together with a facts block, and the answer is
@@ -23,11 +24,14 @@ from .generate import generate_grounded, load_prompt
 from .llm import stream_words
 
 MAX_QUESTION_CHARS = 500
+_CASCADE = re.compile(r"cascade|kessler|breakup|explo|fragment")
 MAX_FACT_EVENTS = 8
 
 OFF_TOPIC = ("I can only help with satellites, space debris, close approaches, avoidance maneuvers and the "
              "cascade simulation in this screening run. Try asking which conjunction is most urgent.")
 NOT_IN_RUN = "That isn't in the current screening run, so I can't answer it from computed data."
+SCREENING_UNAVAILABLE = ("Screening could not run for this window, so I can't tell whether any close approach needs action. "
+                         "Treat this as unknown, not as all clear, and ask again once the catalog has been refreshed.")
 CASCADE_INFO = ("The Cascade Lab models a breakup as seeded fragments spreading along the parent orbit, with orbit "
                 "precession turning the cloud into a ring. It is an approximate illustration of how one collision raises "
                 "the risk to other satellites over the years, not a forecast of specific collisions. Run a scenario in the Cascade Lab.")
@@ -175,7 +179,7 @@ def rule_answer(question: str, context: Mapping[str, Any], now: datetime) -> str
             return f"No close approaches involving {names} in this screening run. {HUMAN_NOTE}"
         more = f" ({len(hits)} events involve it; this is the highest-probability one.)" if len(hits) > 1 else ""
         return f"{conjunction_brief(hits[0], now=now)}{more}"
-    if re.search(r"cascade|kessler|breakup|explo|fragment", q):
+    if _CASCADE.search(q):
         if cas := context.get("cascade"):
             f = _cascade_facts(cas)
             return (f"The simulated breakup of {f['parent']} creates {f['fragmentCount']:,} fragments. By year {f['lastYear']} the model shows "
@@ -201,6 +205,10 @@ async def ask(
         return "Ask a question about this screening run, for example which close approach is most urgent."
     if not is_on_topic(question, context):
         return OFF_TOPIC
+    # An empty run because screening failed must never read as "no close approaches". Cascade answers
+    # come from the simulator, not screening, so they still go through.
+    if context.get("screeningUnavailable") and not _CASCADE.search(question.lower()):
+        return SCREENING_UNAVAILABLE
     fallback = rule_answer(question, context, now)
     if not use_llm:
         return fallback

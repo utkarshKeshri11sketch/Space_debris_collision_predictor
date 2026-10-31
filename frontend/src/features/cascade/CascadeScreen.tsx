@@ -4,6 +4,7 @@ import { useCascade, useCatalog } from '../../api/hooks';
 import type { CascadeResult } from '../../api/types';
 import { formatNumber } from '../../lib/format';
 import { EarthImpactPanel, PreparednessPanel } from './EarthImpactPanels';
+import { ACTIVITY_UNKNOWN, activityKnown } from './earthImpact';
 
 interface Props {
   onResult: (result: CascadeResult | undefined) => void;
@@ -81,6 +82,7 @@ function GrowthChart({ result, year }: { result: CascadeResult; year: number }) 
 
 export default function CascadeScreen({ onResult, onYear }: Props) {
   const catalog = useCatalog();
+  const known = activityKnown(catalog.data);
   const simulation = useCascade();
   // "What if this one hits?" from a conjunction: /cascade?norad=<primary>&from=<conjunction id>
   const [params] = useSearchParams();
@@ -377,13 +379,19 @@ export default function CascadeScreen({ onResult, onYear }: Props) {
                 <dl className="cascade-impact-stats">
                   <div>
                     <dt>Satellites at higher risk</dt>
-                    <dd>{formatNumber(current?.satellitesAtRisk ?? 0)}</dd>
+                    <dd>{known ? formatNumber(current?.satellitesAtRisk ?? 0) : 'Unknown'}</dd>
                   </div>
                   <div>
                     <dt>Extra close approaches</dt>
                     <dd>
-                      +{(current?.extraConjunctionsPct ?? 0).toFixed(1)}
-                      <small>%</small>
+                      {known ? (
+                        <>
+                          +{(current?.extraConjunctionsPct ?? 0).toFixed(1)}
+                          <small>%</small>
+                        </>
+                      ) : (
+                        'Unknown'
+                      )}
                     </dd>
                   </div>
                   <div>
@@ -394,6 +402,7 @@ export default function CascadeScreen({ onResult, onYear }: Props) {
                     </dd>
                   </div>
                 </dl>
+                {!known && <p className="feature-footnote">{ACTIVITY_UNKNOWN}</p>}
                 <section className="feature-section">
                   <div className="feature-subheading">
                     <h3>Tracked population</h3>

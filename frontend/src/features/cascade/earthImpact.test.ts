@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CascadeResult } from '../../api/types';
 import {
+  activityKnown,
   aiTimeline,
   breakupMassKg,
   earthImpact,
@@ -127,5 +128,25 @@ describe('cascade Earth-impact model', () => {
     expect(steps.some((step) => step.title.includes('Re-screen 10 satellites'))).toBe(true);
     expect(steps.some((step) => step.title === 'Secondary collision at 840 km')).toBe(true);
     expect(new Set(steps.map((step) => step.by))).toEqual(new Set(['OrbitSentinel', 'Research']));
+  });
+  it('treats active-satellite counts as unknown when the catalog has no active roster', () => {
+    const object = {
+      noradId: 1,
+      name: 'X',
+      type: 'PAYLOAD' as const,
+      maneuverable: false,
+      omm: {},
+    };
+    expect(activityKnown([{ ...object, active: false }])).toBe(false);
+    expect(activityKnown([{ ...object, active: true }])).toBe(true);
+    const result = cascade(840);
+    const impact = earthImpact(result, 10);
+    const titles = [
+      ...aiTimeline(result, impact, false),
+      ...preparednessActions(result, impact, 10, false),
+    ].map((step) => step.title);
+    expect(titles).toContain('Re-screen every active satellite in the band');
+    expect(titles).toContain('Raise screening for active satellites in the band');
+    expect(titles.some((title) => /\d+ satellites/.test(title))).toBe(false);
   });
 });

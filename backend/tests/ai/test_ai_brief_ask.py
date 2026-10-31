@@ -127,6 +127,16 @@ def test_who_should_move_cites_the_negotiation_only_if_there_is_one(ctx, conjunc
     assert "has not been run yet" in without and "STARLINK-31502 flies" not in without
 
 
+def test_failed_screening_is_never_reported_as_all_clear(now, fake_llm):
+    fake = fake_llm("No close approaches were found. All clear.")
+    ctx = {"conjunctions": [], "screeningUnavailable": "element epoch outside configured age limit"}
+    for q in ("Which conjunction should I worry about this week?", "Is the ISS safe?"):
+        out = run_ask(q, ctx, now=now, llm=fake)
+        assert "could not run" in out and "not as all clear" in out and "No close approaches" not in out
+    assert fake.calls == []
+    assert "No close approaches" not in run_ask("What happens in a cascade?", ctx, now=now, use_llm=False)
+
+
 def test_unknown_but_on_topic_object_is_not_invented(ctx, now):
     out = run_ask("Is HUBBLE in danger?", ctx, now=now, use_llm=False)
     assert out == overview_brief(ctx["conjunctions"], now=now) and "HUBBLE" not in out  # the run overview; nothing made up about HUBBLE

@@ -158,6 +158,9 @@ kbd {
   align-items: center;
   gap: 8px;
 }
+.sync.warn i {
+  background: var(--risk-high);
+}
 .sync i,
 .catalog-sync i,
 .threats-footer i,

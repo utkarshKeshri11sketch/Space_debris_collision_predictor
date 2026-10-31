@@ -24,6 +24,11 @@ const speeds = [1, 60, 600, 3600];
 // Backend Ask Sentinel refusals (app/ai/ask.py OFF_TOPIC / NOT_IN_RUN).
 const REFUSAL = /^(I can only help with|That isn't in the current screening run)/;
 const utc = (ms: number) => new Date(ms).toISOString().slice(11, 19);
+// Date included: a time alone makes an old cached catalog look like today's.
+const syncedLabel = (iso: string | undefined) => {
+  const at = new Date(iso ?? Date.now()).toISOString();
+  return `${at.slice(0, 10)} ${at.slice(11, 16)}`;
+};
 const dateUtc = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const compact = (n: number) => n.toLocaleString('en-US');
 const relative = (date: string, time: number) => {
@@ -72,9 +77,15 @@ export default function App() {
           : location.pathname.startsWith('/conjunctions') || location.pathname.startsWith('/alert')
             ? 'conjunction'
             : 'mission';
-  const eventId =
-    location.pathname.split('/')[2] || (mode === 'negotiator' ? 'starlink-oneweb' : 'iss-cosmos');
   const threats = useConjunctions();
+  const navNegotiation = threats.data?.find(
+    (c) => c.primary.maneuverable && c.secondary.maneuverable,
+  )?.id;
+  // Bare /conjunctions or /negotiator opens the top real event; the sample ids exist only in mock mode.
+  const eventId =
+    location.pathname.split('/')[2] ||
+    (mode === 'negotiator' ? navNegotiation : threats.data?.[0]?.id) ||
+    (isMockMode ? (mode === 'negotiator' ? 'starlink-oneweb' : 'iss-cosmos') : '');
   const detail = useConjunction(mode === 'conjunction' || mode === 'negotiator' ? eventId : '');
   const conjunction = detail.data ?? threats.data?.find((c) => c.id === eventId);
   const { data: catalog } = useCatalog();
@@ -151,9 +162,6 @@ export default function App() {
     setPalette(false);
   };
   const negotiate = (id: string) => navigate(`/negotiator/${id}`);
-  const navNegotiation = threats.data?.find(
-    (c) => c.primary.maneuverable && c.secondary.maneuverable,
-  )?.id;
   return (
     <div
       className={`application mode-${mode} mobile-${mobilePanel}${selectedId !== null ? ' has-selection' : ''}`}
@@ -186,17 +194,19 @@ export default function App() {
           <NavLink to="/" end>
             Mission Control
           </NavLink>
-          <NavLink to={`/conjunctions/${threats.data?.[0]?.id ?? 'iss-cosmos'}`}>
-            Conjunctions
-          </NavLink>
-          <NavLink to={`/negotiator/${navNegotiation ?? 'starlink-oneweb'}`}>Negotiator</NavLink>
+          <NavLink to="/conjunctions">Conjunctions</NavLink>
+          <NavLink to="/negotiator">Negotiator</NavLink>
           <NavLink to="/cascade">Cascade Lab</NavLink>
           <NavLink to="/case-study">Rewind 2021</NavLink>
         </nav>
         <div className="topbar-tools">
-          <span className="sync">
+          <span className={`sync${threats.isError ? ' warn' : ''}`}>
             <i />
-            Systems nominal
+            {threats.isError
+              ? 'Screening unavailable'
+              : threats.isPending
+                ? 'Screening…'
+                : 'Systems nominal'}
           </span>
           <button className="ask-button" aria-label="Ask Sentinel" onClick={() => setPalette(true)}>
             <Icon name="search" size={16} />
@@ -390,7 +400,11 @@ export default function App() {
               </div>
             }
           >
+            {(mode === 'conjunction' || mode === 'negotiator') && !eventId && (
+              <NoEncounter negotiator={mode === 'negotiator'} />
+            )}
             {mode === 'conjunction' &&
+              eventId &&
               (location.pathname.startsWith('/alert') ? (
                 <AlertScreen
                   key={eventId}
@@ -406,7 +420,7 @@ export default function App() {
                   onNegotiate={negotiate}
                 />
               ))}
-            {mode === 'negotiator' && (
+            {mode === 'negotiator' && eventId && (
               <NegotiatorScreen
                 key={eventId}
                 conjunctionId={eventId}
@@ -624,7 +638,7 @@ function MissionLayers({
               ? 'Catalog metadata unavailable'
               : meta.isPending
                 ? 'Synchronizing catalog…'
-                : `Catalog synced · ${utc(new Date(meta.data?.syncedAt ?? Date.now()).getTime())} UTC`}
+                : `Catalog synced · ${syncedLabel(meta.data?.syncedAt)} UTC`}
           </div>
         </div>
       </section>
@@ -641,17 +655,63 @@ function MissionLayers({
   );
 }
 
+/** Conjunctions/Negotiator tab when the screening run has no event to open (live mode only). */
+function NoEncounter({ negotiator }: { negotiator: boolean }) {
+  const threats = useConjunctions();
+  const eyebrow = negotiator ? 'Operator negotiation' : 'Conjunction analysis';
+  if (threats.isPending)
+    return (
+      <aside className="route-panel route-panel-left feature-state" aria-busy="true">
+        <span className="eyebrow">{eyebrow}</span>
+        <h2>Screening the catalog</h2>
+        <p>Close approaches appear here when the screening run finishes.</p>
+        <div className="feature-skeleton" />
+      </aside>
+    );
+  return (
+    <aside className="route-panel route-panel-left feature-state">
+      <span className="eyebrow">{threats.isError ? 'Screening unavailable' : eyebrow}</span>
+      <h2>
+        {threats.isError
+          ? 'No screening data for this window'
+          : negotiator && threats.data.length
+            ? 'No negotiation needed'
+            : 'No close approaches this week'}
+      </h2>
+      <p>
+        {threats.isError
+          ? 'Screening could not run for this window. This is not an all-clear: close approaches cannot be checked until the catalog is refreshed.'
+          : negotiator && threats.data.length
+            ? 'No close approach in this run involves two maneuverable spacecraft, so no operator has to agree who moves.'
+            : 'No close approaches were found above the screening threshold. Continue monitoring catalog updates.'}
+      </p>
+      {threats.isError && (
+        <button className="feature-button" onClick={() => void threats.refetch()}>
+          Retry screening
+        </button>
+      )}
+      {negotiator && (
+        <p>
+          <Link to="/case-study">See a negotiation replayed on a real 2021 incident →</Link>
+        </p>
+      )}
+    </aside>
+  );
+}
+
 function SentinelBrief() {
   const [visible, setVisible] = useState(0);
   const threats = useConjunctions();
   const detail = useConjunction(threats.data?.[0]?.id);
   const text =
     detail.data?.brief ??
-    (detail.isError
-      ? 'The screening brief is unavailable. Review the conjunction data directly.'
-      : threats.data?.length === 0
-        ? 'No close approaches were returned for this screening window. Continue monitoring catalog updates.'
-        : 'Loading the latest screening brief…');
+    (threats.isError
+      ? 'Screening could not run for this window, so there is no brief. This is not an all-clear: close approaches cannot be checked until the catalog is refreshed.'
+      : detail.isError
+        ? 'The screening brief is unavailable. Review the conjunction data directly.'
+        : threats.data?.length === 0
+          ? 'No close approaches were returned for this screening window. Continue monitoring catalog updates.'
+          : 'Loading the latest screening brief…');
   useEffect(() => {
     setVisible(0);
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) {

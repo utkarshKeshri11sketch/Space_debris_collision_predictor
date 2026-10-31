@@ -191,6 +191,17 @@ export interface BandSatellite {
   altKm: number;
 }
 
+/**
+ * The bundled archive snapshot has no active roster, so every object reads inactive. Counts of active
+ * satellites, and the cascade's at-risk and extra-approach figures (weighted by active payloads), are
+ * then unknown rather than zero.
+ */
+export function activityKnown(catalog: CatalogObject[] | undefined): boolean {
+  return Boolean(catalog?.some((object) => object.active));
+}
+export const ACTIVITY_UNKNOWN =
+  'This catalog does not record which satellites are active, so they cannot be counted. Refresh to the live CelesTrak catalog for these figures.';
+
 /** Real active payloads from the loaded catalog within the cloud's altitude band. */
 export function satellitesInBand(catalog: CatalogObject[], altKm: number) {
   const inBand: BandSatellite[] = [];
@@ -218,7 +229,7 @@ export interface AiStep {
 }
 
 /** Where AI helps, step by step through the simulated scenario. Early steps quote the breakup year. */
-export function aiTimeline(result: CascadeResult, impact: EarthImpact): AiStep[] {
+export function aiTimeline(result: CascadeResult, impact: EarthImpact, known = true): AiStep[] {
   const point = nearestPoint(result, 0);
   const altitude = Math.round(impact.parentAltKm);
   const steps: AiStep[] = [
@@ -233,7 +244,9 @@ export function aiTimeline(result: CascadeResult, impact: EarthImpact): AiStep[]
     {
       when: 'Day 1',
       atYear: 0,
-      title: `Re-screen ${point.satellitesAtRisk.toLocaleString('en-US')} satellites in the band`,
+      title: known
+        ? `Re-screen ${point.satellitesAtRisk.toLocaleString('en-US')} satellites in the band`
+        : 'Re-screen every active satellite in the band',
       detail:
         'Screen every satellite near the cloud against the new fragments, every catalog update.',
       by: 'OrbitSentinel',
@@ -242,7 +255,7 @@ export function aiTimeline(result: CascadeResult, impact: EarthImpact): AiStep[]
       when: 'Week 1',
       atYear: 0,
       title: 'Agree who moves',
-      detail: `Close approaches rise ${point.extraConjunctionsPct.toFixed(1)}%. For each pair of active satellites, the Negotiator agrees who maneuvers and logs why, using published weights.`,
+      detail: `${known ? `Close approaches rise ${point.extraConjunctionsPct.toFixed(1)}%. ` : ''}For each pair of active satellites, the Negotiator agrees who maneuvers and logs why, using published weights.`,
       by: 'OrbitSentinel',
     },
   ];
@@ -299,6 +312,7 @@ export function preparednessActions(
   result: CascadeResult,
   impact: EarthImpact,
   year: number,
+  known = true,
 ): PreparednessAction[] {
   const point = nearestPoint(result, year);
   const altitude = Math.round(impact.parentAltKm);
@@ -332,8 +346,10 @@ export function preparednessActions(
   actions.push(
     {
       phase: 'Prepare',
-      title: `Raise screening for ${point.satellitesAtRisk.toLocaleString('en-US')} satellites`,
-      detail: `Close approaches rise ${point.extraConjunctionsPct.toFixed(1)}% in this band. Operators should screen more often and budget extra fuel for avoidance.`,
+      title: known
+        ? `Raise screening for ${point.satellitesAtRisk.toLocaleString('en-US')} satellites`
+        : 'Raise screening for active satellites in the band',
+      detail: `${known ? `Close approaches rise ${point.extraConjunctionsPct.toFixed(1)}% in this band. ` : ''}Operators should screen more often and budget extra fuel for avoidance.`,
     },
     {
       phase: 'Prepare',

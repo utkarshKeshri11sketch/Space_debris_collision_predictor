@@ -3,9 +3,11 @@ import { useCatalog } from '../../api/hooks';
 import type { CascadeResult } from '../../api/types';
 import { formatNumber } from '../../lib/format';
 import {
+  ACTIVITY_UNKNOWN,
   ALUMINA_2022_KG,
   ALUMINA_MEGACONSTELLATION_KG_PER_YEAR,
   RING_FORMATION_MONTHS,
+  activityKnown,
   aiTimeline,
   earthImpact,
   preparednessActions,
@@ -170,6 +172,16 @@ function BandSatellites({ altKm }: { altKm: number }) {
   const catalog = useCatalog();
   const band = useMemo(() => satellitesInBand(catalog.data ?? [], altKm), [catalog.data, altKm]);
   if (!catalog.data) return null;
+  if (!activityKnown(catalog.data))
+    return (
+      <section className="feature-section">
+        <div className="feature-subheading">
+          <h3>Satellites in the debris band</h3>
+          <span>From the loaded catalog</span>
+        </div>
+        <p className="band-count">{ACTIVITY_UNKNOWN}</p>
+      </section>
+    );
   return (
     <section className="feature-section">
       <div className="feature-subheading">
@@ -202,9 +214,11 @@ function BandSatellites({ altKm }: { altKm: number }) {
 }
 
 export function PreparednessPanel({ result, year }: { result: CascadeResult; year: number }) {
+  const catalog = useCatalog();
+  const known = activityKnown(catalog.data);
   const impact = earthImpact(result, year);
-  const actions = preparednessActions(result, impact, year);
-  const steps = aiTimeline(result, impact);
+  const actions = preparednessActions(result, impact, year, known);
+  const steps = aiTimeline(result, impact, known);
   return (
     <div className="earth-impact">
       <section className="feature-section">
