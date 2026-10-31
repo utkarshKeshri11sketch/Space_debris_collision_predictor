@@ -127,6 +127,15 @@ def test_who_should_move_cites_the_negotiation_only_if_there_is_one(ctx, conjunc
     assert "has not been run yet" in without and "STARLINK-31502 flies" not in without
 
 
+def test_brief_follows_physics_when_it_recommends_no_burn_yet(iss_cosmos, now):
+    # Pc between ACT_PC (1e-5) and the physics burn threshold (1e-4): "No action" is recommended.
+    detail = dict(iss_cosmos["conjunction"], pc=5.1e-5)
+    detail["options"] = [dict(o, recommended=o["direction"] == "none") for o in detail["options"]]
+    text = conjunction_brief(detail, now=now)
+    assert "Recommended action" not in text and "No burn is recommended yet" in text
+    assert "keep a burn ready" in text and "0.42 m/s prograde" in text
+
+
 def test_failed_screening_is_never_reported_as_all_clear(now, fake_llm):
     fake = fake_llm("No close approaches were found. All clear.")
     ctx = {"conjunctions": [], "screeningUnavailable": "element epoch outside configured age limit"}

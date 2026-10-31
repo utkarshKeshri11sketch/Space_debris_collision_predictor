@@ -36,6 +36,13 @@ def best_option(detail: Mapping[str, Any]) -> Mapping[str, Any] | None:
     return next((o for o in real if o.get("recommended")), real[0] if real else None)
 
 
+def physics_says_wait(detail: Mapping[str, Any]) -> bool:
+    """Physics marks "No action" recommended below its burn threshold (maneuver.PC_MANEUVER_THRESHOLD,
+    1e-4, the NASA CARA red level). Between ACT_PC and that level the brief must not recommend a burn,
+    or the text contradicts the options shown next to it."""
+    return any(o.get("recommended") and o.get("direction") == "none" for o in detail.get("options", []))
+
+
 def _objects(c: Mapping[str, Any]) -> set[int]:
     return {c["primary"]["noradId"], c["secondary"]["noradId"]}
 
@@ -76,9 +83,13 @@ def conjunction_brief(detail: Mapping[str, Any], *, now: datetime | None = None,
     h = _hours_until(detail["tca"], _now(now))
     when = "" if h is None else (" earlier today" if h < 0 else f" in {fmt.hours(h)}")
     pc = detail["pc"]
+    wait = physics_says_wait(detail)
+    level = ("low enough to keep watching rather than act" if pc < ACT_PC
+             else "high enough to watch closely and keep a burn ready, though below the level where a burn is recommended"
+             if wait else "serious enough that operators normally act")
     sentences = [
         f"{p['name']} and {s['name']} will pass {fmt.distance(detail['missDistanceM'])} apart{when} (their closest approach) at {fmt.speed(detail['relSpeedKms'])}.",
-        f"The chance they collide is {fmt.probability(pc)}, about {fmt.odds(pc)}, which is {'serious enough that operators normally act' if pc >= ACT_PC else 'low enough to keep watching rather than act'}.",
+        f"The chance they collide is {fmt.probability(pc)}, about {fmt.odds(pc)}, which is {level}.",
         _maneuver_sentence(p, s),
     ]
     opt = best_option(detail)
@@ -88,10 +99,16 @@ def conjunction_brief(detail: Mapping[str, Any], *, now: datetime | None = None,
     if opt and pc >= ACT_PC:
         burn_h = fmt.hours_between(detail["tca"], opt.get("burnAt")) if opt.get("burnAt") else None
         timing = "" if burn_h is None else f" {fmt.hours(burn_h)} before closest approach"
-        sentences.append(
-            f"Recommended action: a {fmt.dv(opt['dvMs'])} {opt['direction']} burn{timing}, using {fmt.kg(opt['propellantKg'])} of fuel, "
-            f"which widens the gap to {fmt.distance(opt['newMissM'])} and cuts the collision chance to {fmt.probability(opt['newPc'])}.{tail}"
-        )
+        if wait:
+            sentences.append(
+                f"No burn is recommended yet. If the risk rises, the prepared option is a {fmt.dv(opt['dvMs'])} {opt['direction']} burn{timing}, "
+                f"using {fmt.kg(opt['propellantKg'])} of fuel, which would widen the gap to {fmt.distance(opt['newMissM'])}.{tail}"
+            )
+        else:
+            sentences.append(
+                f"Recommended action: a {fmt.dv(opt['dvMs'])} {opt['direction']} burn{timing}, using {fmt.kg(opt['propellantKg'])} of fuel, "
+                f"which widens the gap to {fmt.distance(opt['newMissM'])} and cuts the collision chance to {fmt.probability(opt['newPc'])}.{tail}"
+            )
     else:
         sentences.append(f"No maneuver is recommended right now; keep tracking and re-check as new data arrives.{tail}")
     sentences.append(HUMAN_NOTE)
@@ -108,6 +125,9 @@ def overview_brief(conjunctions: Sequence[Mapping[str, Any]], *, now: datetime |
 def _facts(top: Mapping[str, Any], others: Sequence[Mapping[str, Any]], now: datetime, target_name: str | None) -> dict:
     opt = best_option(top)
     h = _hours_until(top["tca"], now)
+    # When physics recommends no burn yet, the option is only a prepared one; the key says so, so the
+    # model cannot present it as a recommendation. Other facts (and their cache keys) are unchanged.
+    burn_key = "preparedBurnNotRecommendedYet" if physics_says_wait(top) else "recommendedBurn"
     return {
         "briefingFor": target_name,
         "mostDangerousEvent": {
@@ -116,7 +136,7 @@ def _facts(top: Mapping[str, Any], others: Sequence[Mapping[str, Any]], now: dat
             "hoursUntilClosestApproach": None if h is None else round(h, 1), "missDistanceM": top["missDistanceM"],
             "relativeSpeedKms": top["relSpeedKms"], "collisionProbability": top["pc"], "oddsOneIn": round(1 / top["pc"]) if top["pc"] else None,
             "risk": top.get("risk"),
-            "recommendedBurn": None if not opt else {
+            burn_key: None if not opt else {
                 "dvMs": opt["dvMs"], "direction": opt["direction"], "propellantKg": opt["propellantKg"],
                 "hoursBeforeClosestApproach": None if not opt.get("burnAt") else round(fmt.hours_between(top["tca"], opt["burnAt"]) or 0, 1),
                 "resultingMissM": opt["newMissM"], "resultingCollisionProbability": opt["newPc"],

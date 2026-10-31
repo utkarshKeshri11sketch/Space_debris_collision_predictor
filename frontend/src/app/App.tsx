@@ -24,6 +24,8 @@ const speeds = [1, 60, 600, 3600];
 // Backend Ask Sentinel refusals (app/ai/ask.py OFF_TOPIC / NOT_IN_RUN).
 const REFUSAL = /^(I can only help with|That isn't in the current screening run)/;
 const utc = (ms: number) => new Date(ms).toISOString().slice(11, 19);
+// Fleet/operator from a catalog name, as the backend watch-list does: "STARLINK-1007" -> "STARLINK".
+const operator = (name: string) => name.split('-')[0].split(' ')[0].toUpperCase();
 // Date included: a time alone makes an old cached catalog look like today's.
 const syncedLabel = (iso: string | undefined) => {
   const at = new Date(iso ?? Date.now()).toISOString();
@@ -78,13 +80,19 @@ export default function App() {
             ? 'conjunction'
             : 'mission';
   const threats = useConjunctions();
-  const navNegotiation = threats.data?.find(
-    (c) => c.primary.maneuverable && c.secondary.maneuverable,
+  const byRisk = useMemo(
+    () => [...(threats.data ?? [])].sort((a, b) => b.pc - a.pc),
+    [threats.data],
+  );
+  const negotiable = byRisk.filter((c) => c.primary.maneuverable && c.secondary.maneuverable);
+  // Same-operator pairs (Starlink x Starlink) are coordinated in-house; prefer two operators.
+  const navNegotiation = (
+    negotiable.find((c) => operator(c.primary.name) !== operator(c.secondary.name)) ?? negotiable[0]
   )?.id;
-  // Bare /conjunctions or /negotiator opens the top real event; the sample ids exist only in mock mode.
+  // Bare /conjunctions or /negotiator opens the riskiest real event; sample ids are mock-mode only.
   const eventId =
     location.pathname.split('/')[2] ||
-    (mode === 'negotiator' ? navNegotiation : threats.data?.[0]?.id) ||
+    (mode === 'negotiator' ? navNegotiation : byRisk[0]?.id) ||
     (isMockMode ? (mode === 'negotiator' ? 'starlink-oneweb' : 'iss-cosmos') : '');
   const detail = useConjunction(mode === 'conjunction' || mode === 'negotiator' ? eventId : '');
   const conjunction = detail.data ?? threats.data?.find((c) => c.id === eventId);
@@ -702,7 +710,12 @@ function NoEncounter({ negotiator }: { negotiator: boolean }) {
 function SentinelBrief() {
   const [visible, setVisible] = useState(0);
   const threats = useConjunctions();
-  const detail = useConjunction(threats.data?.[0]?.id);
+  // The decision that matters most: the highest collision probability, not the soonest event.
+  const top = threats.data?.reduce<Conjunction | undefined>(
+    (a, c) => (!a || c.pc > a.pc ? c : a),
+    undefined,
+  );
+  const detail = useConjunction(top?.id);
   const text =
     detail.data?.brief ??
     (threats.isError
